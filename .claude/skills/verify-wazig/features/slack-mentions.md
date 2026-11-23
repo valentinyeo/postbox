@@ -7,6 +7,7 @@
 - `labelled-mention`: a supplied mention label displays as `@Outside Guest` without exposing its id.
 - `external-members`: guest and Slack Connect names absent from the initial member list remain available through cached sender names; upstream-resolved text stays unchanged.
 - `link-cleanup`: Slack link markup still displays its label and preserves the target URL.
+- `mention-compose`: typing `@fix` opens a visible suggestion popup, choosing the person inserts `<@U4A59H6UT>`, and sending retains that exact token in the hub payload.
 
 ## How to get to it (user POV)
 
@@ -24,7 +25,8 @@
 - Assert all five exact strings and the named sender lines. Require the `report` link's target to remain `https://example.org/report`.
 - Retain `before.messages.json` and `after.messages.json` intact. Their `sender_id` fields are transport metadata, not rendered text. Separately retain `before.rendered.json` and `after.rendered.json` with the entire snapshot except that non-rendered `sender_id` metadata; reject the five fixture Slack ids by name and any `<@` or `<https://` markup in these rendered snapshots and both UI Automation trees, so ordinary uppercase UI words cannot trip the check.
 - Keep `before.png`, `after.png`, their UI Automation trees and state snapshots, keyboard actions, authenticated requests and `hub-proof.log` after cleanup.
-- The standard `check-evidence.py` registry dispatcher calls `check_slack_mentions` from `check-slack-mentions-evidence.py`, just as neighbouring archive journeys register their validator functions. It validates retained messages, rendered snapshots, screenshots, UIA title and search/composer controls, selected Slack identity, fixture lookup provenance, no sends/archive/reactions, isolated stores and successful cleanup.
+- Type `@fix`, require a process-owned visible `MessagesShortcodePopup` with nonzero bounds, capture `mention-suggestions.png`, then press Enter. Require exactly `<@U4A59H6UT>` in the native composer and the popup closed. Type ` hello`, send, and require one authenticated accepted payload with text `<@U4A59H6UT> hello`. Retain `mention-picked.json/png` and `mention-sent.png`; changed composer text alone is never mention proof. The fixture must echo the accepted own message in newest-first history with the original wire token. Refresh through the palette, then require exactly six painted messages, exactly one own `MENTION-SENT` row reading `@Fixture Peer hello`, and no raw mention markup. Retain `mention-sent.messages.json`; an acknowledgement alone is not rendered-send proof.
+- The standard `check-evidence.py` registry dispatcher calls `check_slack_mentions` from `check-slack-mentions-evidence.py`, just as neighbouring archive journeys register their validator functions. It validates retained messages, rendered snapshots, screenshots, UIA title and search/composer controls, selected Slack identity, fixture lookup provenance, exactly one mention send and no archive/reaction writes, isolated stores and successful cleanup.
 
 ## Gotchas
 

@@ -7,7 +7,7 @@
 - Two-line fallback quotes open complete URLs.
 - Plain text and dragging do not dispatch.
 - Ordinary reply navigation and Ctrl+O remain usable.
-- The palette command Copy message link copies the first link address in the selected message (`copySelectedLink`, `src/main.zig:12258`).
+- The palette command Copy message link copies the first link address in the selected message (`copySelectedLink`, `src/main.zig:12321`).
 - Control-click marks and unmarks a message.
 - Cursor shape and underlines use native evidence.
 - Four synthetic providers share the journey.
