@@ -43,6 +43,11 @@ def check_reply(folder):
         sent, = [row for row in read(f'{provider}-sent.messages.json')['messages'] if row['from_me']]
         assert sent['quoted_msg_id'] == 'REPLY-ORIGINAL'
         assert sent['quote_line'][3] < sent['bubble'][1]
+    keyboard_reply = read('whatsapp-enter-reply.json')
+    previews = {'REPLY-ORIGINAL': 'First words of the original \U0001F642', 'REPLY-ORPHAN': 'Reply to an unloaded message'}
+    assert keyboard_reply['focused'] == keyboard_reply['reply']
+    assert keyboard_reply['expected'] == keyboard_reply['preview'] == previews[keyboard_reply['focused']]
+    assert read('whatsapp-enter-reply.state.json')['reply']['preview'] == keyboard_reply['preview']
     for name in ['slack-threaded', 'slack-thread']:
         image = (folder / f'{name}.png').read_bytes()
         assert image.startswith(b'\x89PNG\r\n\x1a\n') and len(image) > 10000

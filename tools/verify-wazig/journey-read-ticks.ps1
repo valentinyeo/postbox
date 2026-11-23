@@ -1,6 +1,7 @@
 $chats = @(
     @{ name = 'Verification Read'; id = 'ticks-read@s.whatsapp.net'; shown = $true; stage = 'ticks-read' },
     @{ name = 'Verification Sent'; id = 'ticks-sent@s.whatsapp.net'; shown = $false; stage = 'ticks-sent' },
+    @{ name = 'Verification Late'; id = 'ticks-late@s.whatsapp.net'; shown = $true; stage = 'ticks-late'; mark = 'tick-read' },
     @{ name = 'Verification Group'; id = 'ticks-group@g.us'; shown = $false; stage = 'ticks-group' },
     @{ name = 'Verification Slack'; id = 'slack:fixture-ticks:channel'; shown = $false; stage = 'ticks-slack' },
     @{ name = 'Verification Signal Contact'; id = 'signal:ticks-contact'; shown = $true; stage = 'ticks-signal' },
@@ -35,19 +36,22 @@ function Get-ReadMarkBand($Bubble, $Canvas, $Desktop) {
 foreach ($chat in $chats) {
     Send-Keys $session '^f'
     Send-Keys $session $chat.name
+    $markId = if ($chat.mark) { $chat.mark } else { 'tick-own' }
     $null = Wait-Until {
-        $state = Read-Control $session status
         $shown = Read-Control $session messages
-        $own = @($shown.messages | Where-Object { $_.id -eq 'tick-own' -and $_.bubble[2] -gt $_.bubble[0] -and $_.bubble[3] -gt $_.bubble[1] })
-        $shown.chat.id -eq $chat.id -and $own.Count -eq 1 -and $state.read_tick.message -eq 'tick-own'
-    } "newest own message painted in $($chat.name)"
+        $own = @($shown.messages | Where-Object { $_.id -eq $markId -and $_.bubble[2] -gt $_.bubble[0] -and $_.bubble[3] -gt $_.bubble[1] })
+        $shown.chat.id -eq $chat.id -and $own.Count -eq 1
+    } "own message painted in $($chat.name)"
     $state = Read-Control $session status
+    Save-Screen $session $chat.stage
+    Read-Control $session messages | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $session.evidence "$($chat.stage).messages.json")
+    Assert-That ($state.read_tick.message -eq $markId) "Read mark targets the wrong own message in $($chat.name): expected=$markId actual=$($state.read_tick.message)"
     Assert-That ($state.read_tick.shown -eq $chat.shown) "Read tick wrong in $($chat.name): shown=$($state.read_tick.shown) expected=$($chat.shown)"
     $state.read_tick | ConvertTo-Json | Set-Content (Join-Path $session.evidence "$($chat.stage).json")
     $shown = Read-Control $session messages
     $shown | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $session.evidence "$($chat.stage).messages.json")
     Save-Screen $session $chat.stage
-    $own = @($shown.messages | Where-Object { $_.id -eq 'tick-own' })[0]
+    $own = @($shown.messages | Where-Object { $_.id -eq $markId })[0]
     $band = Get-ReadMarkBand $own.bubble $canvas $desktop
     $blue = Measure-ReadMark (Join-Path $session.evidence "$($chat.stage).png") $band.left $band.top $band.right $band.bottom
     @{ bubble = @($own.bubble); blue_below = $blue } | ConvertTo-Json | Set-Content (Join-Path $session.evidence "$($chat.stage).mark.json")

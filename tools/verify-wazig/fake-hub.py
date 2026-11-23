@@ -1257,6 +1257,7 @@ class SlackThreadBroadcastHandler(SlackThreadsHandler):
 TICK_CHATS = [
     dict(jid='ticks-read@s.whatsapp.net', name='Verification Read', provider='whatsapp', kind='direct', read_by=1),
     dict(jid='ticks-sent@s.whatsapp.net', name='Verification Sent', provider='whatsapp', kind='direct', read_by=0),
+    dict(jid='ticks-late@s.whatsapp.net', name='Verification Late', provider='whatsapp', kind='direct', read_by=0, older_read_by=1),
     dict(jid='ticks-group@g.us', name='Verification Group', provider='whatsapp', kind='group', read_by=2),
     dict(jid='slack:fixture-ticks:channel', name='Verification Slack', provider='slack', kind='direct', read_by=1),
     dict(jid='signal:ticks-contact', name='Verification Signal Contact', provider='signal', kind='direct', read_by=1),
@@ -1287,6 +1288,9 @@ class ReadTicksHandler(SlackSortHandler):
                          Text='Synthetic message you sent', SenderName='Me', ReadBy=chat['read_by']),
                     dict(MsgID='tick-in', ChatJID=chat['jid'], Timestamp='2025-02-19T21:20:10Z', FromMe=False,
                          Text='Synthetic message you received', SenderName='Fixture Sender', ReadBy=0)]
+            if chat.get('older_read_by'):
+                rows.append(dict(MsgID='tick-read', ChatJID=chat['jid'], Timestamp='2025-02-19T21:19:50Z', FromMe=True,
+                                 Text='Earlier message already read', SenderName='Me', ReadBy=chat['older_read_by']))
             self.respond(200, rows)
         elif url.path == '/v1/wazig/events':
             self.events()

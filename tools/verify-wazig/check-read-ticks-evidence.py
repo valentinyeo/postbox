@@ -17,6 +17,7 @@ def check_read_ticks(folder):
     expected = {
         'ticks-read': ('whatsapp', 'ticks-read@s.whatsapp.net', True),
         'ticks-sent': ('whatsapp', 'ticks-sent@s.whatsapp.net', False),
+        'ticks-late': ('whatsapp', 'ticks-late@s.whatsapp.net', True),
         'ticks-group': ('whatsapp', 'ticks-group@g.us', False),
         'ticks-slack': ('slack', 'slack:fixture-ticks:channel', False),
         'ticks-signal': ('signal', 'signal:ticks-contact', True),
@@ -27,11 +28,12 @@ def check_read_ticks(folder):
     pictures = set()
     for stage, (provider, chat, shown) in expected.items():
         tick = read(f'{stage}.json')
-        assert tick == dict(shown=shown, message='tick-own'), (stage, tick)
+        mark_id = 'tick-read' if stage == 'ticks-late' else 'tick-own'
+        assert tick == dict(shown=shown, message=mark_id), (stage, tick)
         state = read(f'{stage}.state.json')
         assert state['selected']['provider'] == provider and state['selected']['id'] == chat, stage
         assert state['read_tick'] == tick, stage
-        own = [row for row in read(f'{stage}.messages.json')['messages'] if row['id'] == 'tick-own']
+        own = [row for row in read(f'{stage}.messages.json')['messages'] if row['id'] == mark_id]
         assert len(own) == 1 and own[0]['bubble'][2] > own[0]['bubble'][0] and own[0]['bubble'][3] > own[0]['bubble'][1], stage
         mark = read(f'{stage}.mark.json')
         assert mark['bubble'] == own[0]['bubble'], (stage, mark['bubble'], own[0]['bubble'])
