@@ -19,15 +19,21 @@ def check_threads(folder):
     panel = read('thread-panel.json')
     off = read('threads-off.json')
     restarted = read('threads-restart.json')
+    chat_whatsapp = read('chat-whatsapp-style.json')
+    chat_slack = read('chat-slack-style.json')
     assert on['parent_id'] == parent and on['parent_reply_line'] == '30 replies' and on['inline_replies'] == 0 and on['loose_replies'] == 0
     assert on['threads_option'] == 'on' and not on['open']
     assert panel['parent_id'] == parent and panel['open'] and panel['replies'] == 30
     assert off['inline_replies'] == 32 and off['loose_replies'] == 32 and off['parent_reply_line'] == '' and off['threads_option'] == 'off' and not off['open']
     assert restarted['restarted'] and restarted['threads_option'] == 'off' and restarted['inline_replies'] == 32
+    assert chat_whatsapp['replies_style'] == 'whatsapp' and chat_whatsapp['threads_option'] == 'off'
+    assert chat_whatsapp['inline_replies'] == 32 and chat_whatsapp['loose_replies'] == 32 and chat_whatsapp['parent_reply_line'] == ''
+    assert chat_slack['replies_style'] == 'slack' and chat_slack['threads_option'] == 'on'
+    assert chat_slack['inline_replies'] == 0 and chat_slack['loose_replies'] == 0 and chat_slack['parent_reply_line'] == '30 replies'
     restart = read('restart.json')
     assert restart['old_start'] != restart['new_start'] and restart['new_pid'] == session['pid']
     assert restart['root'] == session['root'] and restart['id'] == session['id'] and restart['sha256'] == session['sha256']
-    for stage in ['threads-on', 'thread-panel', 'thread-reply', 'threads-off', 'threads-restart']:
+    for stage in ['threads-on', 'thread-panel', 'thread-reply', 'threads-off', 'threads-restart', 'chat-whatsapp-style', 'chat-slack-style']:
         image = (folder / f'{stage}.png').read_bytes()
         assert image.startswith(b'\x89PNG\r\n\x1a\n') and len(image) > 10000
         assert re.fullmatch(r'MessagesZig \| (?:.+ - )?Postbox v' + expected_product_version(folder), (folder / f'{stage}.uia.txt').read_text(encoding='utf-8-sig').splitlines()[0])
@@ -42,11 +48,11 @@ def check_threads(folder):
                          and row['body']['text'] == 'Synthetic thread reply'
                          and (row['body'].get('reply_to') == parent or row['body'].get('thread_ts') == parent) for row in sends)
     actions = (folder / 'actions.log').read_text(encoding='utf-8-sig')
-    for key in ['%2', '^{UP}', '{ENTER}', 'Synthetic thread reply', '{ESC}', '^k', 'Slack threads like Slack for this account', 'Quit Postbox']:
+    for key in ['%2', '^{UP}', '{ENTER}', 'Synthetic thread reply', '{ESC}', '^k', 'Slack threads like Slack for this account', 'Replies: WhatsApp style', 'Replies: Slack style', 'Quit Postbox']:
         assert f'keys: {key}' in actions
     final = read('side-effects.json')
     assert final['pending_sends'] == final['pending_archives'] == 0 and final['sync'] == 'stopped'
     assert final['production_preferences_absent'] and final['whatsapp_store_absent'] and final['telegram_store_absent']
     assert 'JOURNEY PASSED: slack-threads' in (folder / 'result.txt').read_text(encoding='utf-8-sig')
     assert 'CLEANUP PASSED:' in (folder / 'cleanup.txt').read_text(encoding='utf-8-sig')
-    print('EVIDENCE VERIFIED: Slack threads grouping, panel, scoped send, account option and restart')
+    print('EVIDENCE VERIFIED: Slack threads grouping, panel, scoped send, account option, per-chat replies style and restart')

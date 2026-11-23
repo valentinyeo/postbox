@@ -31,6 +31,14 @@ def check_read_ticks(folder):
         state = read(f'{stage}.state.json')
         assert state['selected']['provider'] == provider and state['selected']['id'] == chat, stage
         assert state['read_tick'] == tick, stage
+        own = [row for row in read(f'{stage}.messages.json')['messages'] if row['id'] == 'tick-own']
+        assert len(own) == 1 and own[0]['bubble'][2] > own[0]['bubble'][0] and own[0]['bubble'][3] > own[0]['bubble'][1], stage
+        mark = read(f'{stage}.mark.json')
+        assert mark['bubble'] == own[0]['bubble'], (stage, mark['bubble'], own[0]['bubble'])
+        if shown:
+            assert mark['blue_below'] >= 6, (stage, mark)
+        else:
+            assert mark['blue_below'] == 0, (stage, mark)
         image = (folder / f'{stage}.png').read_bytes()
         assert image.startswith(b'\x89PNG\r\n\x1a\n') and len(image) > 10000, stage
         pictures.add(image)
@@ -42,4 +50,4 @@ def check_read_ticks(folder):
     assert final['production_preferences_absent'] and final['whatsapp_store_absent'] and final['telegram_store_absent']
     assert 'JOURNEY PASSED: read-ticks' in (folder / 'result.txt').read_text(encoding='utf-8-sig')
     assert 'CLEANUP PASSED:' in (folder / 'cleanup.txt').read_text(encoding='utf-8-sig')
-    print('EVIDENCE VERIFIED: grey double tick only on a read one-to-one WhatsApp, Signal or Telegram message, none for unread, group or Slack')
+    print('EVIDENCE VERIFIED: blue double tick and Read label below the bubble right edge only for a read one-to-one WhatsApp, Signal or Telegram message, none for unread, group or Slack')

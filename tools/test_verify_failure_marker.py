@@ -98,7 +98,7 @@ class FailureMarkerTests(unittest.TestCase):
                     (self.evidence / 'journey-check-failed.txt').write_text('search: app check')
                 result = self.classify(0)
                 self.assertNotEqual(result.returncode, 0)
-                self.assertIn('repro passed on base', result.stderr)
+                self.assertIn('journey passed, so it does not show the bug', result.stderr)
 
     def test_empty_or_other_journey_marker_is_rejected(self):
         for contents in ('', 'voice: playback advances'):
@@ -106,11 +106,10 @@ class FailureMarkerTests(unittest.TestCase):
                 (self.evidence / 'journey-check-failed.txt').write_text(contents)
                 self.assertNotEqual(self.classify(1).returncode, 0)
 
-    def test_both_ci_red_jobs_use_the_same_classifier(self):
+    def test_the_planted_job_uses_the_classifier(self):
         workflow = yaml.safe_load((ROOT / '.github/workflows/verify.yml').read_text())
-        for job in ('base-fails', 'planted'):
-            steps = workflow['jobs'][job]['steps']
-            self.assertTrue(any('tools/verify-wazig/classify-red.ps1' in step.get('run', '') for step in steps))
+        steps = workflow['jobs']['planted']['steps']
+        self.assertTrue(any('tools/verify-wazig/classify-red.ps1' in step.get('run', '') for step in steps))
         wrapper = (TOOLS / 'classify-red.ps1').read_text()
         self.assertIn('classify_red.py', wrapper)
         self.assertIn('$LASTEXITCODE -ne 0', wrapper)

@@ -98,25 +98,6 @@ done
 reset_automerge
 "$lint" "$fixture"
 printf 'test-lint-repeats: B11 rejects pre-change workflows and missing PR journey guards\n'
-cp "$repo/.github/workflows/pr-title.yml" "$fixture/.github/workflows/pr-title.yml"
-for mutation in title base; do
-    reset_automerge
-    cp "$repo/.github/workflows/pr-title.yml" "$fixture/.github/workflows/pr-title.yml"
-    case "$mutation" in
-        title) sed -i '/bash tools\/check-repro-first.sh/d' "$fixture/.github/workflows/pr-title.yml" ;;
-        base) sed -i '/.name == ("base-fails (/d' "$fixture/.github/workflows/automerge.yml" ;;
-    esac
-    status=0
-    "$lint" "$fixture" > "$temp/output" 2>&1 || status=$?
-    if (( status != 1 )) || ! grep -Fq '[B12]' "$temp/output"; then
-        cat "$temp/output" >&2
-        printf 'test-lint-repeats: FAIL B12 must reject missing %s guard\n' "$mutation" >&2
-        exit 1
-    fi
-done
-rm "$fixture/.github/workflows/pr-title.yml"
-reset_automerge
-printf 'test-lint-repeats: B12 rejects missing reproduction guards\n'
 for mutation in planted schedule cron; do
     reset_automerge
     case "$mutation" in

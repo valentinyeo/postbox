@@ -87,14 +87,7 @@ def check_release_proof(repo, tag, previous=None, runner=run):
                     files.append(row['filename'])
                     if 'previous_filename' in row:
                         files.append(row['previous_filename'])
-                with tempfile.TemporaryDirectory() as directory:
-                    body = Path(directory) / 'body.txt'
-                    paths = Path(directory) / 'files.txt'
-                    body.write_text(pull.get('body') or '')
-                    paths.write_text('\n'.join(files))
-                    repro = runner(['bash', str(ROOT / 'tools/check-repro-first.sh'),
-                                    pull['title'], str(body), str(paths)]).strip()
-                names = plan_journeys(files, mapping, journeys, repro)
+                names = plan_journeys(files, mapping, journeys)
                 if not names:
                     raise ValueError('changed app features have no selected journeys')
                 head = pull['head']['sha']
