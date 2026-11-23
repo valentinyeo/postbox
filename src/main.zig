@@ -14998,8 +14998,8 @@ fn controlStatus(a: *App, w: *std.Io.Writer) !void {
     try w.print(",\"include_archived\":{},\"bulk_selected_count\":{d},\"mention_roster\":{d},\"mention_query\":\"{s}\"", .{ a.include_archived, a.bulk.items.len, a.mention_roster, a.mention_query.slice() });
     var buffer: [1024]u8 = undefined;
     try w.print(",\"sync\":\"{s}\",\"last_inbox_fetch_ms\":{d},\"hub_reconnect_failures\":{d},\"slack_connected\":{},\"pending_sends\":{d},\"pending_archives\":{d},\"slack_chat_count\":{d},\"chat_count\":{d},\"show_archived\":{},\"unread_only\":{},\"search\":", .{
-        sync, a.last_inbox_fetch_ms, a.hub_reconnect_failures.load(.acquire), a.slack_connected.load(.acquire), pending_sends, a.pending_archive_count,
-        slackChatCount(a), a.chat_count, a.show_archived, a.unread_only,
+        sync,              a.last_inbox_fetch_ms, a.hub_reconnect_failures.load(.acquire), a.slack_connected.load(.acquire), pending_sends, a.pending_archive_count,
+        slackChatCount(a), a.chat_count,          a.show_archived,                         a.unread_only,
     });
     try control_api.writeString(w, controlSearchText(a, &buffer));
     try w.print(",\"theme\":\"{s}\",\"font_scale\":{d},\"staged_attachment_count\":{d}", .{ @tagName(theme.choice), a.font_scale, a.staged_images.count });
