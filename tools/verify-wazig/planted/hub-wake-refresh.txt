@@ -1,0 +1,1 @@
+Skip the shared wake and safety refresh path for configured hubs. With live events muted, the open chat never receives POLL-ROW after resume, so the resume refresh check times out.

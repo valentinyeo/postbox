@@ -1119,6 +1119,8 @@ class SlackMentionsHandler(SlackSortHandler):
             self.respond(200, {'status': 'ok'}, body=body)
         elif self.path == '/v1/wazig/send' and body.get('chat') == MENTIONS_CHAT:
             stamp = (datetime.fromisoformat(self.state.stamp) + timedelta(seconds=1)).isoformat().replace('+00:00', 'Z')
+            with self.state.lock:
+                self.state.sends[body['client_id']] = dict(body, msg_id='MENTION-SENT', ts=stamp)
             self.respond(200, dict(client_id=body.get('client_id'), msg_id='MENTION-SENT', ts=stamp, status='sent'), body=body)
         else:
             self.respond(400, {'error': 'invalid mention request'}, body=body)
@@ -1143,6 +1145,10 @@ class SlackMentionsHandler(SlackSortHandler):
             rows = [dict(MsgID=message_id, ChatJID=MENTIONS_CHAT, Timestamp=f'2025-02-19T21:20:{index:02d}Z',
                          Text=text, FromMe=False, SenderName=names[user], SenderJID=user)
                     for index, (message_id, user, text) in enumerate(texts)]
+            with self.state.lock:
+                rows.extend(dict(MsgID=sent['msg_id'], ChatJID=sent['chat'], Timestamp=sent['ts'],
+                                 Text=sent['text'], FromMe=True, SenderName='You', SenderJID='UFIXTURESELF')
+                            for sent in self.state.sends.values() if sent['chat'] == MENTIONS_CHAT)
             self.respond(200, list(reversed(rows)), members=MENTIONS_MEMBERS, users_info=MENTIONS_INFO, rows=rows)
         elif url.path == '/v1/wazig/events':
             self.events()
@@ -1155,6 +1161,9 @@ class SlackMentionsHandler(SlackSortHandler):
 THREAD_CHAT = 'slack:fixture-threads:channel'
 THREAD_PARENT = '1740000000.000100'
 THREAD_ORPHAN_PARENT = '1739999000.000100'
+FRESH_CHAT = 'fixture-fresh'
+FRESH_PARENT = '1750000000.000100'
+WHATSAPP_CHAT = 'fixture-whatsapp'
 
 
 def thread_rows():
@@ -1166,6 +1175,25 @@ def thread_rows():
     rows.extend(dict(MsgID=f'17400000{index}.000100', Text='Synthetic channel message') for index in (31, 32))
     for index, row in enumerate(rows):
         row.update(ChatJID=THREAD_CHAT, Timestamp=f'2025-02-19T21:20:{index:02d}Z',
+                   FromMe=False, SenderName='Fixture Sender')
+    return list(reversed(rows))
+
+
+def fresh_rows():
+    rows = [dict(MsgID=FRESH_PARENT, Text='Synthetic fresh parent')]
+    rows.extend(dict(MsgID=f'17500000{index:02d}.000100', Text=f'Synthetic fresh reply {index}',
+                     quoted_msg_id=FRESH_PARENT) for index in (1, 2))
+    for index, row in enumerate(rows):
+        row.update(ChatJID=FRESH_CHAT, Timestamp=f'2025-02-19T21:30:{index:02d}Z',
+                   FromMe=False, SenderName='Fixture Sender')
+    return list(reversed(rows))
+
+
+def whatsapp_rows():
+    rows = [dict(MsgID='WA-ORIGINAL', Text='Synthetic whatsapp original'),
+            dict(MsgID='WA-REPLY', Text='Synthetic whatsapp reply', quoted_msg_id='WA-ORIGINAL')]
+    for index, row in enumerate(rows):
+        row.update(ChatJID=WHATSAPP_CHAT, Timestamp=f'2025-02-19T21:40:{index:02d}Z',
                    FromMe=False, SenderName='Fixture Sender')
     return list(reversed(rows))
 
@@ -1195,7 +1223,7 @@ class SlackThreadsHandler(SlackSortHandler):
         if not self.authorized():
             return
         body = json.loads(self.rfile.read(int(self.headers.get('Content-Length', '0'))) or '{}')
-        if self.path == '/v1/wazig/mark-read' and body.get('chat') == THREAD_CHAT:
+        if self.path == '/v1/wazig/mark-read' and body.get('chat') in (THREAD_CHAT, FRESH_CHAT, WHATSAPP_CHAT):
             self.respond(200, {'status': 'ok'}, body=body)
         elif (self.path == '/v1/wazig/send' and body.get('chat') == THREAD_CHAT
               and body.get('reply_to') == THREAD_PARENT and body.get('text') == 'Synthetic thread reply'
@@ -1204,6 +1232,31 @@ class SlackThreadsHandler(SlackSortHandler):
                                    ts=self.state.stamp, status='sent'), body=body)
         else:
             self.respond(400, {'error': 'invalid thread request'}, body=body)
+
+
+class SlackThreadsDefaultHandler(SlackThreadsHandler):
+    def do_GET(self):
+        url = urlsplit(self.path)
+        query = parse_qs(url.query)
+        if url.path == '/v1/wazig/chats':
+            self.wire_path = self.path
+            if not self.authorized():
+                return
+            self.respond(200, [] if query.get('archived') == ['true'] else [
+                dict(jid=THREAD_CHAT, name='Verification Threads', provider='slack', account='fixture-threads',
+                     kind='group', last_message_ts='2025-02-19T21:20:32Z', unread_count=0, archived=False),
+                dict(jid=FRESH_CHAT, name='Verification Fresh', provider='slack', account='fixture-fresh',
+                     kind='group', last_message_ts='2025-02-19T21:30:02Z', unread_count=0, archived=False),
+                dict(jid=WHATSAPP_CHAT, name='Verification WhatsApp', provider='whatsapp', account='fixture-whatsapp',
+                     kind='direct', last_message_ts='2025-02-19T21:40:01Z', unread_count=0, archived=False)])
+            return
+        if url.path == '/v1/wazig/messages' and query.get('chat') in ([FRESH_CHAT], [WHATSAPP_CHAT]):
+            self.wire_path = self.path
+            if not self.authorized():
+                return
+            self.respond(200, fresh_rows() if query['chat'] == [FRESH_CHAT] else whatsapp_rows())
+            return
+        super().do_GET()
 
 
 BROADCAST_PLAIN = 'Synthetic plain thread reply'

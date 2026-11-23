@@ -4,7 +4,7 @@
 
 - Hub Slack mrkdwn displays clean clickable labels and decoded query ampersands.
 - Direct PNG, JPG, JPEG, GIF and WebP links use the existing inline image and large viewer.
-- HTTP(S) pages with Open Graph images show a card with thumbnail, title and site (`drawUnfurlCard`, `src/main.zig:8654`). The description is stored and reported as `preview.description` in the read-only messages JSON but is not drawn. A page without an image can still get a 72 px card with no thumbnail, showing its title (or `Open link`) and host; the validator accepts either a card or none for it.
+- HTTP(S) pages with Open Graph images show a card with thumbnail, title and site (`drawUnfurlCard`, `src/main.zig:8657`). The description is stored and reported as `preview.description` in the read-only messages JSON but is not drawn. A page without an image can still get a 72 px card with no thumbnail, showing its title (or `Open link`) and host; the validator accepts either a card or none for it.
 - URL-scoped memory and disk caches avoid repeated network fetches across repaints and chats on all four providers.
 
 ## How to get to it (user POV)

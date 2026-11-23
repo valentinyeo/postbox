@@ -103,6 +103,13 @@ $null = Wait-Until {
     (Read-Control $session status).pending_sends -eq 0 -and
         @(Read-BridgeRequests $session | Where-Object { $_.wire_path -eq '/v1/wazig/send' -and $_.body.chat -ceq 'slack:fixture-mentions:channel' -and $_.body.text -ceq '<@U4A59H6UT> hello' -and $_.status -eq 200 }).Count -eq 1
 } 'Slack mention send'
+Invoke-PaletteCommand $session 'Refresh'
+$null = Wait-Until {
+    $history = Read-Control $session messages
+    $sent = @($history.messages | Where-Object { $_.id -ceq 'MENTION-SENT' -and $_.from_me -and $_.text -ceq '@Fixture Peer hello' -and $_.bubble[2] -gt $_.bubble[0] })
+    $history.chat.id -ceq 'slack:fixture-mentions:channel' -and $sent.Count -eq 1 -and $history.messages.Count -eq 6 -and @($history.messages | Where-Object { $_.from_me }).Count -eq 1 -and @($history.messages | Where-Object { $_.text -cmatch '<@' }).Count -eq 0
+} 'Slack mention acknowledged bubble renders the name without raw tokens'
+Read-Control $session messages | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $Evidence 'mention-sent.messages.json')
 Save-Screen $session mention-sent
 Hub-Pass $session mention-compose
 Hub-Pass $session mention-display

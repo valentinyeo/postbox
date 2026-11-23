@@ -793,6 +793,10 @@ const App = struct {
     hub_thread: ?std.Thread = null,
     hub_event_pending: std.atomic.Value(bool) = .init(false),
     hub_reset_pending: std.atomic.Value(bool) = .init(false),
+    last_inbox_fetch_ms: u64 = 0,
+    hub_reconnect_failures: std.atomic.Value(u32) = .init(0),
+    hub_reconnect_logged_ms: ?u64 = null,
+    verification_inbox_stale_once: bool = false,
     wacli_path: []u8,
     avatar_dir: []u8,
     hwnd: ?win.HWND = null,
@@ -2780,6 +2784,9 @@ fn applyChats(a: *App, raw: []const u8, fresh: bool) bool {
     }
     a.chat_count = 0;
     a.last_refresh_unix = nowUnixSeconds();
+    if (fresh) {
+        a.last_inbox_fetch_ms = win.GetTickCount64();
+    }
     for (data.items) |item| {
         if (!unifiedHub(a) and !messenger_view.includes(view, .whatsapp)) break;
         if (a.chat_count >= a.chats.len) break;
@@ -15018,9 +15025,9 @@ fn controlStatus(a: *App, w: *std.Io.Writer) !void {
     try w.writeByte(']');
     try w.print(",\"include_archived\":{},\"bulk_selected_count\":{d},\"mention_roster\":{d},\"mention_query\":\"{s}\"", .{ a.include_archived, a.bulk.items.len, a.mention_roster, a.mention_query.slice() });
     var buffer: [1024]u8 = undefined;
-    try w.print(",\"sync\":\"{s}\",\"slack_connected\":{},\"pending_sends\":{d},\"pending_archives\":{d},\"slack_chat_count\":{d},\"chat_count\":{d},\"show_archived\":{},\"unread_only\":{},\"search\":", .{
-        sync,              a.slack_connected.load(.acquire), pending_sends,   a.pending_archive_count,
-        slackChatCount(a), a.chat_count,                     a.show_archived, a.unread_only,
+    try w.print(",\"sync\":\"{s}\",\"last_inbox_fetch_ms\":{d},\"hub_reconnect_failures\":{d},\"slack_connected\":{},\"pending_sends\":{d},\"pending_archives\":{d},\"slack_chat_count\":{d},\"chat_count\":{d},\"show_archived\":{},\"unread_only\":{},\"search\":", .{
+        sync,              a.last_inbox_fetch_ms, a.hub_reconnect_failures.load(.acquire), a.slack_connected.load(.acquire), pending_sends, a.pending_archive_count,
+        slackChatCount(a), a.chat_count,          a.show_archived,                         a.unread_only,
     });
     try control_api.writeString(w, controlSearchText(a, &buffer));
     try w.print(",\"theme\":\"{s}\",\"font_scale\":{d},\"staged_attachment_count\":{d}", .{ @tagName(theme.choice), a.font_scale, a.staged_images.count });
@@ -20061,11 +20068,20 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
             return 0;
         },
         win.WM_POWERBROADCAST => {
-            if (wparam == win.PBT_APMRESUMEAUTOMATIC) startUpdateCheck(hwnd, false);
+            if (wparam == win.PBT_APMRESUMEAUTOMATIC) {
+                if (verification_fixture and a.verification_inbox_stale_once) {
+                    a.verification_inbox_stale_once = false;
+                    a.last_inbox_fetch_ms = a.last_inbox_fetch_ms -| sync_gate.hub_wake_gap_ms -| 1000;
+                    a.last_refresh_unix = nowUnixSeconds() - sync_gate.hub_wake_gap_secs - 1;
+                }
+                hubWakeRefreshIfStale(a);
+                startUpdateCheck(hwnd, false);
+            }
             return 1;
         },
         win.WM_ACTIVATE => {
             if (loword(wparam) != win.WA_INACTIVE) {
+                hubWakeRefreshIfStale(a);
                 startUpdateCheck(hwnd, false);
                 focusCompose(a);
             } else shortcodeHide(a);
@@ -20527,6 +20543,7 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                     }
                 }
                 checkSync(a);
+                hubSafetyRefreshIfDue(a);
                 a.group_refresh_ticks += 1;
                 if (a.group_refresh_ticks >= 60) {
                     refreshGroups(a);
@@ -22095,6 +22112,7 @@ pub fn main(init: std.process.Init) !void {
             app.verification_migration_stop_before_rename = std.mem.eql(u8, migration_case, "hub-migration-before-rename");
         }
         app.verification_retry_evidence = std.mem.eql(u8, init.environ_map.get("WAZIG_VERIFY_RETRY_EVIDENCE") orelse "", "1");
+        app.verification_inbox_stale_once = std.mem.eql(u8, init.environ_map.get("WAZIG_VERIFY_HUB_STALE") orelse "", "1");
         if (init.environ_map.get("WAZIG_VERIFY_OUTBOX_FAULT")) |fault| {
             app.unified_write_fault = std.meta.stringToEnum(@TypeOf(app.unified_write_fault), fault) orelse .none;
             if (init.environ_map.get("WAZIG_VERIFY_OUTBOX_TRANSITION")) |transition| {
@@ -24430,6 +24448,39 @@ fn readHubChats(a: *App, archived: bool) ?[]u8 {
     return a.allocator.dupe(u8, normalized) catch null;
 }
 
+fn hubRefreshInboxAndOpenChat(a: *App) void {
+    if (!hubConfigured(a)) return;
+    const backend = hubTransport(a);
+    backend.refreshChats();
+    if (a.selected_chat < a.chat_count and (unifiedHub(a) or a.chats[a.selected_chat].provider == .whatsapp))
+        backend.refreshMessages(a.chats[a.selected_chat].jid.slice());
+}
+
+fn hubWakeRefreshIfStale(a: *App) void {
+    if (!hubConfigured(a)) return;
+    const stale_tick = sync_gate.hubInboxFetchStale(a.last_inbox_fetch_ms, win.GetTickCount64());
+    const stale_wall = sync_gate.hubWakeUnixStale(a.last_refresh_unix, nowUnixSeconds());
+    if (!stale_tick and !stale_wall) return;
+    hubRefreshInboxAndOpenChat(a);
+}
+
+fn hubSafetyRefreshIfDue(a: *App) void {
+    if (!hubConfigured(a)) return;
+    if (a.hwnd == null) return;
+    const now = win.GetTickCount64();
+    if (!sync_gate.hubSafetyPollDue(a.last_inbox_fetch_ms, now)) return;
+    hubRefreshInboxAndOpenChat(a);
+}
+
+fn hubReconnectSleep(a: *App, wait_ms: u64) void {
+    var waited: u64 = 0;
+    while (waited < wait_ms and !a.hub_stop.load(.acquire)) {
+        const step = @min(@as(u64, 100), wait_ms -| waited);
+        win.Sleep(@intCast(step));
+        waited += step;
+    }
+}
+
 fn startHubEvents(a: *App) void {
     if (a.hub_thread != null or a.hub_stop.load(.acquire)) return;
     a.hub_thread = std.Thread.spawn(.{ .stack_size = 256 * 1024 }, hubEventsMain, .{a}) catch null;
@@ -24440,11 +24491,21 @@ fn hubEventsMain(a: *App) void {
     var sse = wa_hub.Sse{};
     while (!a.hub_stop.load(.acquire)) {
         hubEventSession(a, allocator, &sse) catch |err| {
-            var buffer: [128]u8 = undefined;
-            appendLaunchLog(a, std.fmt.bufPrint(&buffer, "hub events: session failed: {s}", .{@errorName(err)}) catch "hub events: session failed");
+            const failures = a.hub_reconnect_failures.load(.acquire);
+            const wait_ms = sync_gate.hubReconnectWaitMs(failures);
+            a.hub_reconnect_failures.store(failures + 1, .release);
+            if (a.hub_reconnect_logged_ms != wait_ms) {
+                a.hub_reconnect_logged_ms = wait_ms;
+                var buffer: [160]u8 = undefined;
+                appendLaunchLog(a, std.fmt.bufPrint(&buffer, "hub events: session failed: {s}; retry in {d} ms", .{ @errorName(err), wait_ms }) catch "hub events: session failed");
+            }
+            hubReconnectSleep(a, wait_ms);
+            continue;
         };
-        var wait: usize = 0;
-        while (wait < 10 and !a.hub_stop.load(.acquire)) : (wait += 1) win.Sleep(100);
+        if (a.hub_reconnect_failures.load(.acquire) > 0) appendLaunchLog(a, "hub events: connected");
+        a.hub_reconnect_failures.store(0, .release);
+        a.hub_reconnect_logged_ms = null;
+        hubReconnectSleep(a, sync_gate.hubReconnectWaitMs(0));
     }
 }
 
@@ -24811,6 +24872,8 @@ fn toggleSlackThreads(a: *App) void {
     closeSlackThread(a);
     a.selected_message = null;
     invalidateCanvasIconTooltips(a);
+    applyAccountRepliesStyle(a, slackThreadsAccount(a), a.threads_enabled);
+    a.replies_mode_key.set("");
     a.scroll_y = 0;
     a.slack_history_hash = 0;
     a.msg_applied_hash = 0;
@@ -24820,9 +24883,19 @@ fn toggleSlackThreads(a: *App) void {
 
 fn localSlackStyle(a: *App) bool {
     if (a.selected_chat >= a.chat_count) return false;
-    const is_slack = a.chats[a.selected_chat].provider == .slack;
-    const workspace_threads = is_slack and slackThreadsEnabled(a);
-    return slack.repliesFold(repliesSlackMode(a), workspace_threads);
+    return slack.repliesFold(repliesSlackMode(a), a.chats[a.selected_chat].provider == .slack);
+}
+
+fn applyAccountRepliesStyle(a: *App, account: []const u8, enabled: bool) void {
+    if (account.len == 0) return;
+    for (a.chats[0..a.chat_count]) |*chat| {
+        if (chat.provider != .slack or !std.mem.eql(u8, chatViewKey(chat).account, account)) continue;
+        const key = std.fmt.allocPrint(a.allocator, "RepliesSlack:{s}:{s}:{s}", .{ @tagName(chat.provider), chat.account.slice(), chat.jid.slice() }) catch continue;
+        defer a.allocator.free(key);
+        const wide = utf8ToWide(a.allocator, key) catch continue;
+        defer a.allocator.free(wide);
+        _ = saveRegistryString(a.allocator, wide.ptr, if (enabled) "1" else "0");
+    }
 }
 
 fn hasDirectReplies(a: *const App, parent: *const Message) bool {

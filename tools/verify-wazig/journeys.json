@@ -221,6 +221,24 @@
       "maximize": true
     },
     {
+      "name": "hub-wake-refresh",
+      "pr": true,
+      "hub": "legacy",
+      "evidence": true,
+      "chats": 2,
+      "script": "journey-hub-wake-refresh.ps1",
+      "validator": {
+        "file": "check-hub-wake-refresh-evidence.py",
+        "function": "check_hub_wake_refresh"
+      },
+      "hub_handler": {
+        "file": "fake-wa-bridge.py",
+        "class": "Handler"
+      },
+      "prepare": "prepare-hub-wake-refresh.ps1",
+      "maximize": true
+    },
+    {
       "name": "whatsapp-hub",
       "pr": true,
       "hub": "legacy",
@@ -430,7 +448,7 @@
       "pr": true,
       "hub": "slack-threads",
       "evidence": true,
-      "chats": 1,
+      "chats": 3,
       "script": "journey-slack-threads.ps1",
       "validator": {
         "file": "check-slack-threads-evidence.py",
@@ -438,8 +456,9 @@
       },
       "hub_handler": {
         "file": "fake-hub.py",
-        "class": "SlackThreadsHandler"
+        "class": "SlackThreadsDefaultHandler"
       },
+      "prepare": "prepare-slack-threads.ps1",
       "maximize": true
     },
     {

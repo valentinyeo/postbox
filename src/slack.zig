@@ -1544,8 +1544,8 @@ pub fn repliesSetting(value: ?[]const u8) ?bool {
     return std.mem.eql(u8, text, "1");
 }
 
-pub fn repliesFold(saved: ?bool, workspace_threads: bool) bool {
-    return saved orelse workspace_threads;
+pub fn repliesFold(saved: ?bool, slack_provider: bool) bool {
+    return saved orelse slack_provider;
 }
 
 pub fn threadsSettingValue(enabled: bool) []const u8 {
@@ -1590,7 +1590,7 @@ test "Slack thread preference round trip defaults on and stays scoped to each ac
     try std.testing.expect(threadsSetting(saved.get(second)));
 }
 
-test "saved replies style tells unset from WhatsApp style and falls back to the workspace threads setting" {
+test "saved replies style tells unset from WhatsApp style and defaults Slack chats to Slack style" {
     try std.testing.expectEqual(@as(?bool, null), repliesSetting(null));
     try std.testing.expectEqual(@as(?bool, false), repliesSetting("0"));
     try std.testing.expectEqual(@as(?bool, true), repliesSetting("1"));
