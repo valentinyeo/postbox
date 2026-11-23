@@ -2,28 +2,29 @@
 
 ## Sub-features
 
-- A mark sits below the newest own message the other person read: a blue double tick (`design.provider_colors.telegram`, `#2AABEE`) followed by the word `Read` in the small grey timestamp style, right-aligned with the bubble's right edge.
-- The mark never covers bubble text, emoji or a reaction chip. The message row reserves its own vertical space, so nothing overlaps the next row or the composer.
-- One-to-one WhatsApp, Signal and Telegram chats show it when the read count is at least one (`shows` in `src/read_receipt.zig`). The app walks back from the newest own message to the newest one that was read, so a chat whose newest own message is still unread keeps the mark on the message that was read. Unread chats, groups and Slack show nothing.
-- The reading position holds: when a row's height changes between paints (the read mark appearing or clearing, an image arriving), a chat scrolled away from the bottom keeps the top visible message at the same screen position (`src/message_anchor.zig`). At the bottom the newest message stays pinned instead.
+- Every own message in a chat shows WhatsApp ticks at the bottom-right inside its bubble, in the bubble's bottom padding so the row keeps the same height whatever the status is.
+- One grey tick means sent to the server, two grey ticks mean delivered, two blue ticks mean read. Grey is the muted hint ink (`theme.current.on_surface_variant`); read is the design kit's blue (`design.provider_colors.telegram`, `#2AABEE`). Pending and failed sends keep their own state and show no ticks.
+- Per-message status comes from the recipient counts the hub already returns: `DeliveredTo` and `ReadBy` (`status` in `src/read_receipt.zig`). One-to-one WhatsApp, Signal and Telegram chats read the counts directly. WhatsApp groups only turn blue once every recipient the message reached has also read it, because the hub gives counts and not the group's member total.
+- Slack and Telegram channels show nothing. Groups on Signal show nothing.
+- Ticks never change a row's height or the scroll position, so no reading hold is needed when a receipt arrives (`src/message_anchor.zig` is gone).
 
 ## How to get to it (user POV)
 
-- Open a one-to-one WhatsApp, Signal or Telegram chat where one of your messages was read. The mark shows under the right edge of that bubble, below the reactions if any.
-- Scroll up in a long chat and let a read receipt arrive or clear: the messages you are reading stay where they are.
+- Open a one-to-one WhatsApp chat with a message you sent. One grey tick appears as soon as the server has it, two grey when the other phone received it, two blue when the other person read it.
+- Scroll up in a long chat and let a receipt arrive: the messages you are reading stay where they are.
 
 ## Driving it with PowerShell UI Automation
 
 - Run `feature=read-ticks` on GitHub Actions only, using the unified fake hub in `--read-ticks` mode.
-- The fixture has ten chats. Nine end with one message you sent: WhatsApp read, unread, late-read, group; Slack; Signal one-to-one (read) and Signal group; Telegram one-to-one read and Telegram one-to-one unread. The late chat sends an unread message after one that was read, so its mark belongs on `tick-old`. The hold chat `Verification Hold` has forty messages and its newest one starts read. In the Slack chat and the two unread one-to-one chats the control output names no message, because none of their own messages was read.
-- Real Ctrl+F and the chat name select each chat. The journey waits until the marked bubble is painted, then reads `read_tick` from read-only `wazigctl status` and saves `ticks-read`, `ticks-sent`, `ticks-late`, `ticks-group`, `ticks-slack`, `ticks-signal`, `ticks-signal-group`, `ticks-telegram` and `ticks-telegram-unread` as picture, state, json, `messages.json` and `mark.json`.
-- The validator requires the mark only for the read one-to-one WhatsApp, Signal and Telegram chats, and never under the unread newest message of the late chat. It also reads the saved screenshot under the marked bubble's right edge and demands at least six blue pixels where the rule shows the mark and none where it does not.
-- Then it opens `Verification Hold`, presses PageUp, records the top painted message, posts `/fixture/ticks/read` so the fixture reports the newest own message read, waits for the app to repaint with the mark, and requires that top message to be the same id within two pixels. A read receipt never goes back to unread, so the mark has to arrive rather than clear.
+- The fixture has eleven chats. Nine end with messages you sent: WhatsApp sent, delivered and read; a late-read chat whose newest own message is only delivered while an older one is read; a WhatsApp group delivered to three and read by two; Slack; Signal one-to-one read and Signal group; Telegram one-to-one read and Telegram one-to-one unread (sent). The hold chat `Verification Hold` has forty messages and its newest one starts delivered, then turns read.
+- Real Ctrl+F and the chat name select each chat. The journey waits until `tick-own` is painted, then reads each message's `ticks` field from read-only `wazigctl messages`, and saves every chat as picture, state, json, `messages.json` and `<stage>.json`.
+- The validator requires one grey tick for sent, two grey for delivered and two blue for read. It counts pixels in a band across the bubble's bottom-right corner: at least six muted-grey pixels for one tick, more for two, at least eight blue pixels for read, and none for Slack or a Signal group. The late chat's older message must be blue while its newest own message is not.
+- Then it opens `Verification Hold`, records the delivered newest bubble and its pixels, presses PageUp, records the top painted message, posts `/fixture/ticks/read` so the fixture reports the newest own message read, waits for the app to repaint, and requires that top message to be the same id within two pixels. It then returns to the bottom and requires the bubble's height and bottom edge to be unchanged while the ticks turned blue.
 
 ## Gotchas
 
 - Synthetic data proves the client contract, not live WhatsApp delivery.
-- `read_tick.shown` is computed from the same rule the painter uses. The screenshot pixel count is what proves the mark is really drawn and placed.
-- Real hub rows only carry a read count when the store recorded the receipt, so many real chats have no read own message at all and correctly show nothing. Slack rows never carry one (the app stores a read count for WhatsApp, Telegram and Signal only), so `read_tick` names no message in a Slack chat.
-- Source: `src/read_receipt.zig`, `receiptCapability`, `readMarkIndex` and `drawReadMark` in `src/main.zig`, geometry in `src/message_layout.zig`, the held reading position in `src/message_anchor.zig`.
+- Real hub rows carry `DeliveredTo` and `ReadBy` only when the store recorded the receipt, so a message nobody reported on shows one grey tick. Slack and Signal-group rows carry no counts.
+- A group's blue ticks mean the recipients the message reached have all read it. WhatsApp's own rule needs the group's member total, which the hub does not send.
+- Source: `src/read_receipt.zig`, `receiptCapability` and `drawReadTicks` in `src/main.zig`, geometry in `src/message_layout.zig`.
 - Journey: `tools/verify-wazig/journey-read-ticks.ps1`; evidence: `tools/verify-wazig/check-read-ticks-evidence.py`; fixture: `tools/verify-wazig/fake-hub.py`.
