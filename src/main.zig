@@ -16,6 +16,7 @@ const avatar = @import("avatar.zig");
 const avatar_mask = @import("avatar_mask.zig");
 const dictation = @import("dictation.zig");
 const dictation_policy = @import("dictation_policy.zig");
+const dictation_live = @import("dictation_live.zig");
 const environment_keys = @import("environment_keys.zig");
 const drafts = @import("drafts.zig");
 const voice_capture = @import("voice_capture.zig");
@@ -92,6 +93,7 @@ const transport = @import("transport.zig");
 const messenger_view = @import("messenger_view.zig");
 const outbox = @import("outbox.zig");
 const unified_snapshot = @import("unified_snapshot.zig");
+const exit_record = @import("exit_record.zig");
 
 const max_chats = 256;
 const max_groups = 1024;
@@ -747,6 +749,10 @@ const DictationFinish = struct {
 };
 
 const DictationOperation = struct {
+    live_anchor: dictation_live.Anchor = .{ .start = 0, .end = 0 },
+    live_snapshot: ?[:0]u16 = null,
+    live_revision: u64 = 0,
+    live_detached: bool = false,
     origin: drafts.Identity,
     context: DictationContext,
     text: [:0]u16,
@@ -11597,6 +11603,12 @@ fn ensureDictation(a: *App) ?*dictation.Session {
                 return a.dictation_session;
             };
             session.fixture = .{ .pcm = pcm, .response = response };
+            const port_path = messagesDirPath(a, "dictation-live-port.txt") orelse return a.dictation_session;
+            defer a.allocator.free(port_path);
+            if (readFileWin(a.allocator, port_path, 16)) |port| {
+                defer a.allocator.free(port);
+                session.live_fixture_port = std.fmt.parseInt(u16, std.mem.trim(u8, port, "\r\n "), 10) catch return a.dictation_session;
+            }
         }
     }
     return a.dictation_session;
@@ -11738,6 +11750,7 @@ fn freeDictationOperation(allocator: std.mem.Allocator, operation: DictationOper
         .insert_only, .manual => {},
     }
     allocator.free(operation.text);
+    if (operation.live_snapshot) |snapshot| allocator.free(snapshot);
 }
 
 fn releaseDictationOperation(a: *App) void {
@@ -11895,7 +11908,7 @@ fn toggleDictation(a: *App) void {
             var end: u32 = 0;
             _ = win.SendMessageW(compose, win.EM_GETSEL, @intFromPtr(&start), @bitCast(@intFromPtr(&end)));
             if (session.start(a.deepgram_key, a.dictation_language, origin)) {
-                a.dictation_operation = .{ .origin = drafts.Identity.init(origin), .context = context, .text = text, .selection_start = start, .selection_end = end };
+                a.dictation_operation = .{ .origin = drafts.Identity.init(origin), .context = context, .text = text, .selection_start = start, .selection_end = end, .live_anchor = .{ .start = start, .end = end } };
                 updateDictateButton(a, .recording);
                 setStatus(a, "Listening... press Ctrl+D to stop");
             } else {
@@ -11913,10 +11926,73 @@ fn toggleDictation(a: *App) void {
     }
 }
 
+fn updateLiveDictation(a: *App, session: *dictation.Session) void {
+    const operation = if (a.dictation_operation) |*value| value else return;
+    if (operation.live_detached or std.meta.activeTag(operation.intent) != .insert_only or !sameDictationContext(a, &operation.context)) return;
+    var transcript_buffer: [dictation_live.capacity]u8 = undefined;
+    var revision = operation.live_revision;
+    const transcript = session.peekLiveTranscript(&transcript_buffer, &revision) orelse return;
+    const edit = operation.context.compose;
+    var wide: [drafts.max_text + 1]u16 = undefined;
+    const length: usize = @intCast(win.GetWindowTextW(edit, &wide, wide.len));
+    const expected = if (operation.live_snapshot) |snapshot| snapshot else operation.text;
+    if (!std.mem.eql(u16, wide[0..length], expected)) {
+        operation.live_detached = true;
+        disarmDictationSend(a);
+        session.requestStop();
+        setStatus(a, "Dictation stopped; draft edited");
+        return;
+    }
+    if (transcript.len == 0) {
+        a.draft_loading = true;
+        const restored = win.SetWindowTextW(edit, operation.text.ptr);
+        a.draft_loading = false;
+        if (restored == 0) return;
+        _ = win.SendMessageW(edit, win.EM_SETSEL, operation.selection_start, @intCast(operation.selection_end));
+        if (operation.live_snapshot) |snapshot| a.allocator.free(snapshot);
+        operation.live_snapshot = null;
+        operation.live_anchor = .{ .start = operation.selection_start, .end = operation.selection_end };
+        operation.live_revision = revision;
+        saveComposerDraft(a);
+        return;
+    }
+    const prepared = prepareDictation(a.allocator, operation.text, operation.selection_start, operation.selection_end, transcript) catch {
+        setStatus(a, "Could not prepare live dictation draft");
+        return;
+    };
+    defer prepared.deinit(a.allocator);
+    const snapshot = a.allocator.dupeZ(u16, prepared.whole) catch return;
+    a.draft_store.save(a.allocator, operation.origin.key(), prepared.utf8) catch {
+        a.allocator.free(snapshot);
+        setStatus(a, "Could not save live dictation draft");
+        return;
+    };
+    a.draft_loading = true;
+    _ = win.SendMessageW(edit, win.EM_SETSEL, operation.live_anchor.start, @intCast(operation.live_anchor.end));
+    _ = win.SendMessageW(edit, win.EM_REPLACESEL, win.FALSE, @bitCast(@intFromPtr(prepared.insertion.ptr)));
+    a.draft_loading = false;
+    const got: usize = @intCast(win.GetWindowTextW(edit, &wide, wide.len));
+    if (!std.mem.eql(u16, wide[0..got], snapshot)) {
+        a.allocator.free(snapshot);
+        operation.live_detached = true;
+        disarmDictationSend(a);
+        session.requestStop();
+        saveComposerDraft(a);
+        setStatus(a, "Dictation stopped; display changed");
+        return;
+    }
+    if (operation.live_snapshot) |previous| a.allocator.free(previous);
+    operation.live_snapshot = snapshot;
+    operation.live_anchor.end = operation.live_anchor.start + @as(u32, @intCast(prepared.insertion.len));
+    operation.live_revision = revision;
+    _ = win.SendMessageW(edit, win.EM_SCROLLCARET, 0, 0);
+}
+
 fn updateDictation(a: *App) void {
     const session = a.dictation_session orelse return;
     observeDictationContext(a);
     const state = session.state();
+    if (state == .recording) updateLiveDictation(a, session);
     if (state == .ready) {
         if (!session.fixtureConsumeReady()) return;
         var transcript_buffer: [8192]u8 = undefined;
@@ -11981,6 +12057,20 @@ fn updateDictation(a: *App) void {
                 start = @intCast(text.len);
                 end = start;
                 manual = true;
+            }
+        }
+        if (a.dictation_operation) |*operation| {
+            const expected = if (operation.live_snapshot) |snapshot| snapshot else operation.text;
+            if (operation.live_detached or (session.isLive() and !std.mem.eql(u16, base, expected))) {
+                if (!session.consumeTranscript()) return;
+                releaseDictationOperation(a);
+                updateDictateButton(a, .idle);
+                setStatus(a, "Dictation stopped; draft edited");
+                return;
+            }
+            if (session.isLive()) {
+                start = operation.live_anchor.start;
+                end = operation.live_anchor.end;
             }
         }
         const prepared = prepareDictation(a.allocator, base, start, end, transcript) catch |err| {
@@ -20518,7 +20608,7 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                 _ = win.InvalidateRect(hwnd, &dirty, win.FALSE);
             } else if (id == id_compose and notification == win.EN_CHANGE) {
                 if (a.dictation_operation) |*operation| {
-                    if (std.meta.activeTag(operation.intent) == .sending) disarmDictationSend(a);
+                    if (!a.draft_loading and std.meta.activeTag(operation.intent) == .sending) disarmDictationSend(a);
                 }
                 if (a.compose) |compose| {
                     if (win.GetWindowTextLengthW(compose) == 0) a.compose_dragged = 0;
@@ -20678,6 +20768,7 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
             saveWindowRect(hwnd);
             saveComposerDraft(a);
             persistDrafts(a);
+            logCloseRequest(a);
             _ = win.DestroyWindow(hwnd);
             return 0;
         },
@@ -20769,6 +20860,7 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
             if (a.brush_sidebar) |brush| _ = win.DeleteObject(brush);
             if (a.brush_raised) |brush| _ = win.DeleteObject(brush);
             if (a.brush_muted) |brush| _ = win.DeleteObject(brush);
+            writeExitRecord(a, .wm_close);
             win.PostQuitMessage(0);
             return 0;
         },
@@ -21418,6 +21510,50 @@ fn appendLaunchLog(a: *App, event: []const u8) void {
     _ = win.WriteFile(handle, line.ptr, @intCast(line.len), &written, null);
 }
 
+const exit_record_name = "last-exit.txt";
+
+fn exitUptimeSeconds() u64 {
+    return (win.GetTickCount64() -% process_start_ms) / 1000;
+}
+
+fn logCloseRequest(a: *App) void {
+    var buffer: [64]u8 = undefined;
+    appendLaunchLog(a, exit_record.closeRequestLine(&buffer, exitUptimeSeconds()) catch return);
+}
+
+fn writeExitRecord(a: *App, reason: exit_record.Reason) void {
+    const record: exit_record.Record = .{
+        .at = nowUnixSeconds(),
+        .version = app_version,
+        .reason = reason,
+        .uptime_seconds = exitUptimeSeconds(),
+        .code = 0,
+    };
+    var record_buffer: [128]u8 = undefined;
+    const text = exit_record.format(&record_buffer, record) catch return;
+    if (messagesDirPath(a, exit_record_name)) |path| {
+        defer a.allocator.free(path);
+        _ = writeCacheFileAtomic(a, path, text);
+    }
+    var line_buffer: [160]u8 = undefined;
+    appendLaunchLog(a, exit_record.exitLine(&line_buffer, record) catch return);
+}
+
+fn reportPreviousExit(a: *App) void {
+    const path = messagesDirPath(a, exit_record_name) orelse return;
+    defer a.allocator.free(path);
+    var line_buffer: [224]u8 = undefined;
+    if (readFileWin(a.allocator, path, 1024)) |stored| {
+        defer a.allocator.free(stored);
+        if (exit_record.parse(stored)) |record| {
+            appendLaunchLog(a, exit_record.startupLine(&line_buffer, record) catch exit_record.startup_missing_line);
+        } else appendLaunchLog(a, exit_record.startup_missing_line);
+    } else appendLaunchLog(a, exit_record.startup_missing_line);
+    const wide = std.unicode.utf8ToUtf16LeAllocZ(a.allocator, path) catch return;
+    defer a.allocator.free(wide);
+    _ = win.DeleteFileW(wide.ptr);
+}
+
 fn loadPlayed(a: *App) void {
     loadHashSet(a, a.played_path, &a.played_set);
     loadVoicePos(a);
@@ -22047,6 +22183,7 @@ pub fn main(init: std.process.Init) !void {
         if (app.view_order.len > 0) init.gpa.free(app.view_order);
     }
     app.startup_probe_pending = !verification_fixture or hubConfigured(app);
+    reportPreviousExit(app);
     if (cache_tag) |tag| {
         app.cache_tag.set(&tag);
         appendLaunchLog(app, "startup: saved account tag loaded");
@@ -23872,6 +24009,7 @@ fn relaunchIntoUpdate(a: *App) void {
     if (launched) {
         _ = win.CloseHandle(process.hProcess);
         _ = win.CloseHandle(process.hThread);
+        writeExitRecord(a, .update);
         _ = win.PostQuitMessage(0);
     } else {
         setStatus(a, "Update installed - restart the app to finish");
