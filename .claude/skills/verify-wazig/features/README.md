@@ -24,7 +24,7 @@ Window: 2026-10-24 through 2026-11-23, ending at `291191a`. These are source dis
 |---|---|---|
 | `e360ea7`: Slack autocomplete | `src/main.zig:11248`, `src/mention_index.zig:66` | `slack-mentions` requires the visible popup, exact token and sent payload; the duplicate hub text-change probe is retired. |
 | `6f3db97`: per-chat Slack Replies choice | `src/main.zig:24826` | `slack-threads` checks both saved chat styles against the account default. |
-| `febf904`, `2995401`: Read mark and chat isolation | `src/main.zig:18119`, `src/read_receipt.zig:18` | `read-ticks`; the older-read/newest-unread case exposes the current newest-own-only selection bug. |
+| `febf904`, `2995401`: Read mark and chat isolation | `src/main.zig:18119`, `src/read_receipt.zig:18` | `read-ticks`; the older-read/newest-unread case caught the newest-own-only selection bug, which #561 fixed. The journey keeps that case: the newest own message stays delivered while the older one shows blue. |
 | `528e4e7`: loaded page thumbnail | `src/main.zig:8657`, `src/unfurl.zig` | `link-previews` checks card-image pixels. |
 | `eda5db7`: voice pill, message grouping and link-card redesign | `src/chat_screen.zig:27`, `src/chat_screen.zig:110`, `src/main.zig:22668` | Existing voice and link journeys cover their original assertions; the title-adjacent pill, Today line and one timestamp per sender group still need dedicated screenshot measurements. |
 | `ee076a1`: native new-message toasts, no tray | `src/toast.zig:195`, `src/toast.zig:216`, `src/main.zig:3023` | Unreachable in the current recipes: need a hosted notification-center capture and real activation input tied to a synthetic incoming message. An accepted notification API call alone is not visible proof. |
