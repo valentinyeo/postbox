@@ -589,6 +589,13 @@
       "why": ""
     },
     {
+      "feature": "dictation-live",
+      "source": "src:dictation-live",
+      "proof": "dictation-live",
+      "status": "covered",
+      "why": ""
+    },
+    {
       "feature": "gif-picker",
       "source": "src:gif-picker",
       "proof": "gif-picker",

@@ -98,6 +98,7 @@ if ($journey.hub) {
     } else {
         $start.Environment['WAZIG_HUB_URL'] = $bridge.url
         $start.Environment['WAZIG_HUB_TOKEN'] = (Get-Content (Join-Path $PSScriptRoot 'fake-wa-bridge.py') | Where-Object { $_.StartsWith('KEY = ') }).Split("'")[1]
+        if ($Feature -ceq 'dictation-live') { [IO.File]::WriteAllText((Join-Path $messages 'dictation-live-port.txt'), ([Uri]$bridge.url).Port.ToString()) }
         if ($Feature -ceq 'gif-picker') { $start.Environment['POSTBOX_GIPHY_PORT'] = ([Uri]$bridge.url).Port.ToString() }
     }
 }

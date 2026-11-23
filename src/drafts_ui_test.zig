@@ -2,6 +2,7 @@ const std = @import("std");
 const drafts = @import("drafts.zig");
 const chat_key = @import("chat_key.zig");
 const edit_contract = @import("edit_contract.zig");
+const dictation_live = @import("dictation_live.zig");
 const test_allocator = std.testing.allocator;
 const verification_fixture = false;
 
@@ -19,14 +20,31 @@ const Chat = struct {
 };
 const dictation = struct {
     const State = enum { idle, failed, recording, transcribing, ready };
+    const Session = MockSession;
 };
-const Session = struct {
+const Session = dictation.Session;
+const MockSession = struct {
     origin: drafts.Identity,
     ready: bool = true,
     failed: bool = false,
+    recording: bool = false,
+    live: bool = false,
+    live_revision: u64 = 1,
     transcript: []const u8 = "spoken transcript",
     fn state(self: *const Session) dictation.State {
-        return if (self.failed) .failed else if (self.ready) .ready else .idle;
+        return if (self.failed) .failed else if (self.recording) .recording else if (self.ready) .ready else .idle;
+    }
+    fn isLive(self: *const Session) bool {
+        return self.live;
+    }
+    fn requestStop(self: *Session) void {
+        self.recording = false;
+    }
+    fn peekLiveTranscript(self: *Session, buffer: []u8, revision: *u64) ?[]const u8 {
+        if (revision.* == self.live_revision or buffer.len < self.transcript.len) return null;
+        @memcpy(buffer[0..self.transcript.len], self.transcript);
+        revision.* = self.live_revision;
+        return buffer[0..self.transcript.len];
     }
     fn fixtureConsumeReady(_: *const Session) bool {
         return true;
@@ -46,13 +64,22 @@ const Session = struct {
 const outbox = struct {
     const max_text_len = 4095;
 };
+const DictationContext = struct { compose: usize = 1 };
 const DictationFinish = struct {
-    context: struct {},
+    context: DictationContext,
     text: [:0]u16,
     selection_start: u32,
     selection_end: u32,
 };
 const DictationOperation = struct {
+    live_anchor: dictation_live.Anchor = .{ .start = 0, .end = 0 },
+    live_snapshot: ?[:0]u16 = null,
+    live_revision: u64 = 0,
+    live_detached: bool = false,
+    origin: drafts.Identity = .{},
+    context: DictationContext = .{},
+    selection_start: u32 = 0,
+    selection_end: u32 = 0,
     text: [:0]u16,
     intent: union(enum) { insert_only, sending: DictationFinish, manual } = .insert_only,
 };
@@ -224,6 +251,7 @@ fn freeDictationOperation(a: std.mem.Allocator, operation: DictationOperation) v
         .insert_only, .manual => {},
     }
     a.free(operation.text);
+    if (operation.live_snapshot) |snapshot| a.free(snapshot);
 }
 fn releaseDictationOperation(a: *App) void {
     if (a.dictation_operation) |operation| {
@@ -540,4 +568,137 @@ test "IGSH-1267 context mismatch keeps current origin draft unsent" {
     updateDictation(&app);
     try expectComposer(&app, "edited spoken transcript");
     try std.testing.expectEqual(@as(usize, 0), app.send_calls);
+}
+
+fn startLiveTest(a: *App, session: *Session) !void {
+    switchComposerDraft(a);
+    _ = win.SetWindowTextW(1, lit("Before old after"));
+    session.* = .{ .origin = a.draft_store.open.?, .recording = true, .live = true, .ready = false, .transcript = "hello" };
+    a.dictation_session = session;
+    a.dictation_operation = .{
+        .text = try test_allocator.dupeZ(u16, std.mem.span(lit("Before old after"))),
+        .origin = session.origin,
+        .selection_start = 7,
+        .selection_end = 10,
+        .live_anchor = .{ .start = 7, .end = 10 },
+    };
+}
+
+test "live interim revisions and final replace the selection and keep surrounding words" {
+    var app = App{};
+    current = &app;
+    defer app.deinit();
+    var session: Session = undefined;
+    try startLiveTest(&app, &session);
+    updateDictation(&app);
+    try expectComposer(&app, "Before hello after");
+    session.transcript = "hello world";
+    session.live_revision += 1;
+    updateDictation(&app);
+    updateDictation(&app);
+    try expectComposer(&app, "Before hello world after");
+    session.transcript = "Hello world.";
+    session.recording = false;
+    session.ready = true;
+    updateDictation(&app);
+    updateDictation(&app);
+    try expectComposer(&app, "Before Hello world. after");
+    try std.testing.expectEqualStrings("Before Hello world. after", app.draft_store.get(session.origin.key()));
+    try std.testing.expect(!session.ready and app.dictation_operation == null);
+    try std.testing.expectEqual(@as(usize, 0), app.send_calls);
+}
+
+test "finish and send replaces the preview rather than appending it" {
+    var app = App{};
+    current = &app;
+    defer app.deinit();
+    var session: Session = undefined;
+    try startLiveTest(&app, &session);
+    updateDictation(&app);
+    const snapshot = try test_allocator.dupeZ(u16, app.dictation_operation.?.live_snapshot.?);
+    app.dictation_operation.?.intent = .{ .sending = .{ .context = .{}, .text = snapshot, .selection_start = 12, .selection_end = 12 } };
+    session.transcript = "Hello world.";
+    session.recording = false;
+    session.ready = true;
+    app.send_accept = false;
+    updateDictation(&app);
+    updateDictation(&app);
+    try expectComposer(&app, "Before Hello world. after");
+    try std.testing.expectEqual(@as(usize, 1), app.send_calls);
+}
+
+test "manual editing stops live dictation without overwriting or duplicating the draft" {
+    var app = App{};
+    current = &app;
+    defer app.deinit();
+    var session: Session = undefined;
+    try startLiveTest(&app, &session);
+    updateDictation(&app);
+    _ = win.SetWindowTextW(1, lit("Before hello after my edit"));
+    session.live_revision += 1;
+    session.transcript = "hello world";
+    updateDictation(&app);
+    try std.testing.expect(!session.recording);
+    session.ready = true;
+    updateDictation(&app);
+    try expectComposer(&app, "Before hello after my edit");
+    try std.testing.expect(!session.ready and app.dictation_operation == null);
+    try std.testing.expectEqual(@as(usize, 0), app.send_calls);
+}
+
+test "final text replaces an offscreen origin preview without changing the other chat" {
+    var app = App{};
+    current = &app;
+    defer app.deinit();
+    var session: Session = undefined;
+    try startLiveTest(&app, &session);
+    updateDictation(&app);
+    app.selected_chat = 1;
+    switchComposerDraft(&app);
+    _ = win.SetWindowTextW(1, lit("Other chat"));
+    session.recording = false;
+    session.ready = true;
+    session.transcript = "Hello world.";
+    updateDictation(&app);
+    try expectComposer(&app, "Other chat");
+    try std.testing.expectEqualStrings("Before Hello world. after", app.draft_store.get(session.origin.key()));
+    try std.testing.expectEqual(@as(usize, 0), app.send_calls);
+}
+
+test "stopping before the first preview still uses the original cursor anchor" {
+    var app = App{};
+    current = &app;
+    defer app.deinit();
+    var session: Session = undefined;
+    try startLiveTest(&app, &session);
+    app.selection_start = 0;
+    app.selection_end = 0;
+    session.recording = false;
+    session.ready = true;
+    session.transcript = "Hello world.";
+    updateDictation(&app);
+    try expectComposer(&app, "Before Hello world. after");
+    try std.testing.expectEqual(@as(usize, 0), app.send_calls);
+}
+
+test "an empty revised interim restores the selected original words" {
+    var app = App{};
+    current = &app;
+    defer app.deinit();
+    var session: Session = undefined;
+    try startLiveTest(&app, &session);
+    updateDictation(&app);
+    session.transcript = "";
+    session.live_revision += 1;
+    updateDictation(&app);
+    try expectComposer(&app, "Before old after");
+    session.transcript = "Grüße";
+    session.live_revision += 1;
+    updateDictation(&app);
+    try expectComposer(&app, "Before Grüße after");
+    session.recording = false;
+    session.ready = true;
+    session.transcript = "Grüße!";
+    updateDictation(&app);
+    try expectComposer(&app, "Before Grüße! after");
 }

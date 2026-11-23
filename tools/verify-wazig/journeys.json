@@ -37,6 +37,24 @@
       "prepare": "prepare-dictation.ps1"
     },
     {
+      "name": "dictation-live",
+      "pr": true,
+      "hub": "dictation-live",
+      "evidence": true,
+      "chats": 2,
+      "script": "journey-dictation-live.ps1",
+      "validator": {
+        "file": "check-dictation-live-evidence.py",
+        "function": "check_evidence"
+      },
+      "hub_handler": {
+        "file": "dictation-fixture.py",
+        "class": "DictationHandler"
+      },
+      "maximize": true,
+      "prepare": "prepare-dictation.ps1"
+    },
+    {
       "name": "sidebar-surface",
       "pr": true,
       "hub": null,
