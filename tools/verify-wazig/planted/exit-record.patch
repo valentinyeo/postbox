@@ -1,10 +1,14 @@
 diff --git a/src/main.zig b/src/main.zig
 --- a/src/main.zig
 +++ b/src/main.zig
-@@ -20754,6 +20754,5 @@ fn handleMainMessage(
-             if (a.brush_raised) |brush| _ = win.DeleteObject(brush);
-             if (a.brush_muted) |brush| _ = win.DeleteObject(brush);
--            writeExitRecord(a, .wm_close);
-             win.PostQuitMessage(0);
-             return 0;
-         },
+@@ -21393,10 +21393,4 @@ fn writeExitRecord(a: *App, reason: exit_record.Reason) void {
+         .code = 0,
+     };
+-    var record_buffer: [128]u8 = undefined;
+-    const text = exit_record.format(&record_buffer, record) catch return;
+-    if (messagesDirPath(a, exit_record_name)) |path| {
+-        defer a.allocator.free(path);
+-        _ = writeCacheFileAtomic(a, path, text);
+-    }
+     var line_buffer: [160]u8 = undefined;
+     appendLaunchLog(a, exit_record.exitLine(&line_buffer, record) catch return);
