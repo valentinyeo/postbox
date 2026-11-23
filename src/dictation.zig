@@ -387,7 +387,7 @@ const Transport = struct {
     pub fn sendMultilingual(self: *@This(), mime: []const u8, audio: []const u8) ![]u8 {
         const response = try self.sendAt(lit(dictation_policy.multilingual_path), mime, audio);
         defer self.allocator.free(response);
-        return parseResponse(self.allocator, response);
+        return (try dictation_policy.parseResponse(self.allocator, response)).text;
     }
 };
 
