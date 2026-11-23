@@ -11250,6 +11250,46 @@ fn paintReplyBar(a: *App, shapes: *const smooth.Context, hdc: win.HDC) void {
     drawFluentIcon(a, hdc, close, 0xE711, theme.current.on_surface_variant);
 }
 
+fn updateMentionPopup(a: *App) bool {
+    const compose = a.compose orelse return false;
+    var wide: [drafts.max_text + 1]u16 = undefined;
+    const length: usize = @intCast(win.GetWindowTextW(compose, &wide, wide.len));
+    var sel_start: u32 = 0;
+    var sel_end: u32 = 0;
+    _ = win.SendMessageW(compose, win.EM_GETSEL, @intFromPtr(&sel_start), @bitCast(@intFromPtr(&sel_end)));
+    if (sel_start != sel_end or length == 0) return false;
+    const text = std.unicode.utf16LeToUtf8Alloc(a.allocator, wide[0..length]) catch return false;
+    defer a.allocator.free(text);
+    const token = mention_index.activeToken(text, sel_start) orelse return false;
+    var names: [32][128]u8 = undefined;
+    var people: [32]mention_index.Person = undefined;
+    const roster = mentionPeople(a, &names, &people);
+    var matches: [8]?mention_index.Match = @splat(null);
+    a.mention_roster = roster;
+    a.mention_query.set(token.query);
+    const found = mention_index.search(people[0..roster], token.query, selectedChatIsSlack(a), &matches);
+    if (found == 0) {
+        shortcodeHide(a);
+        return true;
+    }
+    a.sc_mention = true;
+    a.sc_sel = 0;
+    a.sc_count = @min(found, a.mention_rows.len);
+    for (matches[0..a.sc_count], 0..) |match, position| a.mention_rows[position] = people[match.?.index];
+    showMentionPopup(a, sel_start);
+    var status_buffer: [320]u8 = undefined;
+    var stream = std.Io.Writer.fixed(&status_buffer);
+    stream.writeAll("Mention: ") catch {};
+    const shown = @min(found, 3);
+    for (matches[0..shown], 0..) |match, position| {
+        if (position > 0) stream.writeAll(", ") catch {};
+        stream.writeAll(people[match.?.index].name) catch {};
+    }
+    if (found > shown) stream.print(" +{d}", .{found - shown}) catch {};
+    setStatus(a, stream.buffered());
+    return true;
+}
+
 fn acceptMention(a: *App) bool {
     const compose = a.compose orelse return false;
     var wide: [drafts.max_text + 1]u16 = undefined;
@@ -12805,6 +12845,7 @@ fn shortcodeUpdate(a: *App) void {
         if (shortcodes.resolve(t.query())) |emoji| return shortcodeReplace(a, t, emoji);
         return shortcodeHide(a);
     }
+    a.sc_mention = false;
     a.sc_count = shortcodes.matches(t.query(), &a.sc_matches);
     a.sc_sel = 0;
     if (a.sc_count == 0) return shortcodeHide(a);
@@ -20521,46 +20562,10 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                 }
                 if (a.compose) |compose| {
                     if (win.GetWindowTextLengthW(compose) == 0) a.compose_dragged = 0;
-                    var wide: [drafts.max_text + 1]u16 = undefined;
-                    const length: usize = @intCast(win.GetWindowTextW(compose, &wide, wide.len));
-                    var sel_start: u32 = 0;
-                    var sel_end: u32 = 0;
-                    _ = win.SendMessageW(compose, win.EM_GETSEL, @intFromPtr(&sel_start), @bitCast(@intFromPtr(&sel_end)));
-                    if (sel_start == sel_end and length > 0) {
-                        if (std.unicode.utf16LeToUtf8Alloc(a.allocator, wide[0..length])) |text| {
-                            defer a.allocator.free(text);
-                            if (mention_index.activeToken(text, sel_start)) |token| {
-                                var names: [32][128]u8 = undefined;
-                                var people: [32]mention_index.Person = undefined;
-                                const roster = mentionPeople(a, &names, &people);
-                                var matches: [8]?mention_index.Match = @splat(null);
-                                a.mention_roster = roster;
-                                a.mention_query.set(token.query);
-                                const found = mention_index.search(people[0..roster], token.query, selectedChatIsSlack(a), &matches);
-                                if (found > 0) {
-                                    a.sc_mention = true;
-                                    a.sc_sel = 0;
-                                    a.sc_count = @min(found, a.mention_rows.len);
-                                    for (matches[0..a.sc_count], 0..) |match, position| a.mention_rows[position] = people[match.?.index];
-                                    showMentionPopup(a, sel_start);
-                                    var status_buffer: [320]u8 = undefined;
-                                    var stream = std.Io.Writer.fixed(&status_buffer);
-                                    stream.writeAll("Mention: ") catch {};
-                                    const shown = @min(found, 3);
-                                    for (matches[0..shown], 0..) |match, position| {
-                                        if (position > 0) stream.writeAll(", ") catch {};
-                                        stream.writeAll(people[match.?.index].name) catch {};
-                                    }
-                                    if (found > shown) stream.print(" +{d}", .{found - shown}) catch {};
-                                    setStatus(a, stream.buffered());
-                                }
-                            }
-                        } else |_| {}
-                    }
                 }
                 saveComposerDraft(a);
                 layoutComposer(a);
-                shortcodeUpdate(a);
+                if (!updateMentionPopup(a)) shortcodeUpdate(a);
             }
             return 0;
         },

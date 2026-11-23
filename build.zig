@@ -429,6 +429,7 @@ pub fn build(b: *std.Build) void {
         @embedFile("tools/repaint_test.zig"),
         "fn syncMainIconTooltips(_: *App) void {}\n",
         "fn composeRevealTop(_: *App) void {}\n",
+        "fn updateMentionPopup(_: *App) bool { return false; }\n",
         buffer_source[(std.mem.indexOfScalar(u8, buffer_source, '\n') orelse unreachable) + 1 ..],
         sourceSection("fn stagedPreviewColumns(", "fn layout(a:"),
         "fn composeChanged(a: *App) void {\n",
