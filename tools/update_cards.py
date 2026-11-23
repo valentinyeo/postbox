@@ -142,14 +142,16 @@ def compose_release(repo, tag):
 
 def update_file(repo, tag, runner=None):
     runner = runner or command
-    release = json.loads(runner(["gh", "api", f"repos/{repo}/releases/tags/{tag}"]))
+    release = json.loads(runner("gh", "api", f"repos/{repo}/releases/tags/{tag}"))
     if release.get("tag_name") != tag:
         raise ValueError(f"release {tag} is not published")
     history = []
-    for row in json.loads(runner(["gh", "api", f"repos/{repo}/releases?per_page=20"])):
+    for row in json.loads(runner("gh", "api", f"repos/{repo}/releases?per_page=20")):
         if not row.get("tag_name") or row.get("draft") or row.get("prerelease"):
             continue
         history.append({"tag_name": row["tag_name"], "body": row.get("body") or ""})
+    if not any(row["tag_name"] == tag for row in history):
+        history.insert(0, {"tag_name": tag, "body": release.get("body") or ""})
     assets = [
         {key: asset[key] for key in ("name", "browser_download_url", "size", "digest")}
         for asset in release.get("assets") or []

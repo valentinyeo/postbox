@@ -274,6 +274,13 @@
       "why": ""
     },
     {
+      "feature": "hub-inbox-refresh",
+      "source": "main:hubSafetyRefreshIfDue",
+      "proof": "hub-wake-refresh",
+      "status": "covered",
+      "why": ""
+    },
+    {
       "feature": "command_replies_slack",
       "source": "buildPaletteItems:command_replies_slack",
       "proof": "reply",
@@ -621,7 +628,7 @@
       "source": "src:update-card",
       "proof": "quiet-status",
       "status": "covered",
-      "why": ""
+      "why": "Card visibility is covered by quiet-status. postbox-upgrade.ps1 checks the newest offer with the GitHub API limit exhausted; tools/test_update_cards.py exercises release-file publishing through the real CLI."
     },
     {
       "feature": "atomic-update",
