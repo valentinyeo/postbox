@@ -57,7 +57,7 @@ jobs:
                 echo "#$pr: could not resolve the merge commit; not starting ci" >&2
                 exit 1
               fi
-              for workflow in ci.yml no-comments.yml; do
+              for workflow in ci.yml no-comments.yml auto-release.yml; do
                 workflow_started=""
                 for _ in 1 2 3; do
                   gh workflow run "$workflow" -R "$REPO" --ref main || echo "#$pr: dispatch attempt failed; retrying"
@@ -95,7 +95,7 @@ jobs:
             if ! echo "${head_oid}" | grep -Eq '^[0-9a-f]{40}$'; then
               echo "could not resolve main head; skipping self-heal this pass" >&2
             else
-              for workflow in ci.yml no-comments.yml; do
+              for workflow in ci.yml no-comments.yml auto-release.yml; do
                 run_count=$(gh run list -R "$REPO" -w "$workflow" -b main --commit "$head_oid" --json databaseId -q 'length') || run_count=""
                 if [ -z "$run_count" ]; then
                   echo "could not list ${workflow} runs for main head; skipping self-heal this pass" >&2

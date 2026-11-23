@@ -264,6 +264,8 @@ FNR == 1 {
         fail(FNR, "B7", "workflow runs on a self-hosted runner, whose public logs show the server\047s name and folders", "runs-on: ubuntu-latest")
     if (file == ".github/workflows/automerge.yml" && code ~ /^[[:space:]]*REPO_OWNER:[[:space:]]*\$\{\{[[:space:]]*github\.repository_owner[[:space:]]*\}\}/) owner_env = 1
     if (!running) next
+    if (file == ".github/workflows/automerge.yml" && code ~ /for workflow in / && code !~ /(^|[[:space:]])auto-release\.yml([[:space:];]|$)/)
+        fail(FNR, "B1", "automerge dispatch loop omits the release after a bot merge", "auto-release.yml in both the post-merge and self-heal workflow lists")
     if (file == ".github/workflows/auto-release.yml") {
         if (code ~ /git[[:space:]]+push.*next_tag/ || code ~ /ref=refs\/tags\/\$\{next_tag\}/) tag_line = FNR
         if (code ~ /gh[[:space:]]+workflow[[:space:]]+run[[:space:]]+release\.yml/ && code ~ /--ref[[:space:]]+"?\$\{next_tag\}/) dispatch = 1
