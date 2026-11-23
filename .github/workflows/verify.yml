@@ -614,10 +614,4 @@ jobs:
           EVIDENCE_DIR: evidence
           VERDICT_POST: ${{ github.event.pull_request.head.repo.full_name == github.repository && '1' || '0' }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-        run: |
-          if [ -f tools/verify-wazig/verifier.py ]; then
-            judge=tools/verify-wazig/verifier.py
-          else
-            judge=tools/verify-wazig/verdict.py
-          fi
-          JUDGE="$judge" python3 -c 'import json, os, runpy; needs = json.loads(os.environ["NEEDS_JSON"]); needs["base-fails"] = needs["base-fails"] if "base-fails" in needs else {"result": "success", "outputs": {"classified": "true"}}; os.environ["NEEDS_JSON"] = json.dumps(needs); runpy.run_path(os.environ["JUDGE"], run_name="__main__")'
+        run: python3 tools/verify-wazig/verifier.py
