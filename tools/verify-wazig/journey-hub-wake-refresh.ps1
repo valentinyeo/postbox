@@ -37,15 +37,13 @@ $hubLines = @(Get-Content $launchLogPath | Where-Object { $_ -match 'hub events:
 $retries = @($hubLines | Where-Object { $_ -match 'retry in \d+ ms' } | ForEach-Object { [int]($_ -replace '.*retry in (\d+) ms.*', '$1') })
 Assert-That ($retries.Count -ge 3 -and $retries[0] -eq 1000 -and $retries[1] -eq 2000 -and $retries[2] -eq 4000) 'Retry waits did not double then cap'
 Assert-That (@($retries | Select-Object -Unique).Count -eq $retries.Count) 'Repeated retry waits were logged more than once'
-$offlineConnected = @($hubLines | Where-Object { $_ -match 'hub events: connected' }).Count
 Invoke-RestMethod -Method Post -Uri "$($session.bridge_url)/fixture/restore-events" -Headers $headers -Body '{}' -ContentType 'application/json' | Out-Null
 $recovered = Wait-Until {
     $state = Read-Control $session status
-    if ($state.sync_state -ceq 'caught_up' -and @(Get-Content $launchLogPath | Where-Object { $_ -match 'hub events: connected' }).Count -gt $offlineConnected) { $state }
+    if ($state.sync_state -ceq 'caught_up' -and $state.sync_line -clike 'Up to date*') { $state }
 } 'the sync line returns to up to date' 60
-@{ caught_up = @{ state = $caughtUp.sync_state; line = $caughtUp.sync_line; rect = $caughtUpRect }; offline = @{ state = $offline.sync_state; line = $offline.sync_line; rect = $offlineRect }; retries = $retries; connected = @(Get-Content $launchLogPath | Where-Object { $_ -match 'hub events: connected' }).Count } | ConvertTo-Json -Depth 8 | Set-Content (Join-Path $Evidence 'sync-line.json')
+@{ caught_up = @{ state = $caughtUp.sync_state; line = $caughtUp.sync_line; rect = $caughtUpRect }; offline = @{ state = $offline.sync_state; line = $offline.sync_line; rect = $offlineRect }; retries = $retries; reconnected_requests = @(Read-BridgeRequests $session | Where-Object { $_.path -eq '/v1/events' -and $_.status -eq 200 }).Count } | ConvertTo-Json -Depth 8 | Set-Content (Join-Path $Evidence 'sync-line.json')
 Hub-Pass $session retry-backoff
-Assert-That ($recovered.sync_line -clike 'Up to date*') 'Reconnected line does not say up to date'
 Hub-Pass $session sync-line
 Invoke-RestMethod -Method Post -Uri "$($session.bridge_url)/fixture/mute-sse" -Headers $headers -Body '{}' -ContentType 'application/json' | Out-Null
 Invoke-RestMethod -Method Post -Uri "$($session.bridge_url)/fixture/stale-row" -Headers $headers -Body '{}' -ContentType 'application/json' | Out-Null

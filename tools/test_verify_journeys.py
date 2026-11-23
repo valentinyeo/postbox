@@ -397,7 +397,7 @@ class HubWakeRefreshEvidenceTests(unittest.TestCase):
             'poll.messages.json': {'messages': [{'id': 'POLL-ROW'}]},
             'sync-line.json': {'caught_up': {'state': 'caught_up', 'line': 'Up to date \u00b7 08:45', 'rect': [2, 2, 22, 12]},
                                'offline': {'state': 'offline', 'line': 'Offline \u00b7 last sync 08:45', 'rect': [2, 2, 30, 16]},
-                               'retries': [1000, 2000, 4000, 8000], 'connected': 1},
+                               'retries': [1000, 2000, 4000, 8000], 'reconnected_requests': 2},
         }.items():
             (self.folder / name).write_text(json.dumps(value))
         self.screen('sync-caught-up.png', 40)
@@ -430,6 +430,13 @@ class HubWakeRefreshEvidenceTests(unittest.TestCase):
     def test_repeated_or_flat_retry_waits_are_rejected(self):
         evidence = json.loads((self.folder / 'sync-line.json').read_text())
         evidence['retries'] = [1000, 2000, 2000, 4000]
+        (self.folder / 'sync-line.json').write_text(json.dumps(evidence))
+        with self.assertRaises(AssertionError):
+            self.check(self.folder)
+
+    def test_single_event_stream_connection_is_rejected(self):
+        evidence = json.loads((self.folder / 'sync-line.json').read_text())
+        evidence['reconnected_requests'] = 1
         (self.folder / 'sync-line.json').write_text(json.dumps(evidence))
         with self.assertRaises(AssertionError):
             self.check(self.folder)

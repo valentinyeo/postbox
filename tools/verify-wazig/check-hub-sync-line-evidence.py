@@ -53,7 +53,7 @@ def check_hub_sync_line(folder):
     assert retries[:3] == [1000, 2000, 4000], retries
     assert sorted(set(retries)) == sorted(retries), retries
     assert all(later > earlier for earlier, later in zip(retries, retries[1:])), retries
-    assert evidence['connected'] == 1, evidence['connected']
+    assert evidence['reconnected_requests'] >= 2, evidence['reconnected_requests']
     screens = {
         'caught_up': ink(PNG['read_png'](folder / 'sync-caught-up.png')[2], caught_up['rect']),
         'offline': ink(PNG['read_png'](folder / 'sync-offline.png')[2], offline['rect']),
