@@ -20,13 +20,13 @@ class SlackThreadsTests(unittest.TestCase):
         self.write('session.json', dict(feature='slack-threads', sha256='synthetic-hash', commit='synthetic-commit', pid=2, root='fixture', id='fixture-id'))
         self.write('result.json', dict(feature='slack-threads', status='passed'))
         self.write('restart.json', dict(old_start='1', new_start='2', new_pid=2, root='fixture', id='fixture-id', sha256='synthetic-hash'))
-        base = dict(parent_id=PARENT, parent_reply_line='30 replies', inline_replies=0, loose_replies=0, threads_option='on', open=False, replies=0)
-        for stage in ['threads-on', 'thread-panel', 'thread-reply', 'threads-off', 'threads-restart']:
+        base = dict(parent_id=PARENT, parent_reply_line='30 replies', inline_replies=0, loose_replies=0, threads_option='on', replies_style='slack', open=False, replies=0)
+        for stage in ['threads-on', 'thread-panel', 'thread-reply', 'threads-off', 'threads-restart', 'chat-whatsapp-style', 'chat-slack-style']:
             state = dict(base)
             if stage in ('thread-panel', 'thread-reply'):
                 state.update(open=True, replies=30)
-            if stage in ('threads-off', 'threads-restart'):
-                state.update(parent_reply_line='', inline_replies=32, loose_replies=32, threads_option='off')
+            if stage in ('threads-off', 'threads-restart', 'chat-whatsapp-style'):
+                state.update(parent_reply_line='', inline_replies=32, loose_replies=32, threads_option='off', replies_style='whatsapp')
             self.write(f'{stage}.state.json', dict(selected=dict(provider='slack', id='slack:fixture-threads:channel'), slack_threads=state))
             if stage != 'thread-reply':
                 self.write(f'{stage}.json', dict(state, **({'restarted': True} if stage == 'threads-restart' else {})))
@@ -36,7 +36,7 @@ class SlackThreadsTests(unittest.TestCase):
                              body=dict(chat='slack:fixture-threads:channel', text='Synthetic thread reply', reply_to=PARENT))]
         self.save_requests()
         self.write('side-effects.json', dict(pending_sends=0, pending_archives=0, sync='stopped', production_preferences_absent=True, whatsapp_store_absent=True, telegram_store_absent=True))
-        (self.folder / 'actions.log').write_text('\n'.join('keys: ' + key for key in ['%2', '^{UP}', '{ENTER}', 'Synthetic thread reply', '{ESC}', '^k', 'Slack threads like Slack for this account', 'Quit Postbox']))
+        (self.folder / 'actions.log').write_text('\n'.join('keys: ' + key for key in ['%2', '^{UP}', '{ENTER}', 'Synthetic thread reply', '{ESC}', '^k', 'Slack threads like Slack for this account', 'Replies: WhatsApp style', 'Replies: Slack style', 'Quit Postbox']))
         (self.folder / 'cleanup.txt').write_text('CLEANUP PASSED: synthetic validator input')
         (self.folder / 'result.txt').write_text('JOURNEY PASSED: slack-threads')
 
@@ -59,6 +59,8 @@ class SlackThreadsTests(unittest.TestCase):
                  ('thread-panel.json', dict(replies=29)), ('thread-panel.json', dict(open=False)),
                  ('threads-on.json', dict(loose_replies=2)), ('threads-off.json', dict(inline_replies=0)), ('threads-off.json', dict(parent_reply_line='30 replies')),
                  ('threads-restart.json', dict(threads_option='on')), ('threads-restart.json', dict(restarted=False)),
+                 ('chat-whatsapp-style.json', dict(inline_replies=0)), ('chat-whatsapp-style.json', dict(replies_style='slack')),
+                 ('chat-slack-style.json', dict(parent_reply_line='')), ('chat-slack-style.json', dict(replies_style='whatsapp')),
                  ('restart.json', dict(new_start='1')), ('result.json', dict(status='failed')),
                  ('side-effects.json', dict(pending_sends=1))]
         for name, mutation in cases:
@@ -117,6 +119,10 @@ class SlackThreadsTests(unittest.TestCase):
         self.assertIn('.slack_threads.parent_reply_line', journey)
         self.assertIn("'30 replies'", journey)
         self.assertIn('loose_replies -eq 0', journey)
+        self.assertIn("Invoke-PaletteCommand $Session 'Replies: WhatsApp style'", journey)
+        self.assertIn("Invoke-PaletteCommand $Session 'Replies: Slack style'", journey)
+        self.assertIn("replies_style -eq 'whatsapp'", journey)
+        self.assertIn("replies_style -eq 'slack'", journey)
 
 
 if __name__ == '__main__':

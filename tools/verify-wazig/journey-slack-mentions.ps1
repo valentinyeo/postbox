@@ -1,3 +1,34 @@
+Add-Type @'
+using System;
+using System.Runtime.InteropServices;
+using System.Text;
+public static class VerifyMentionPopup {
+    delegate bool EnumWindow(IntPtr window, IntPtr data);
+    [DllImport("user32.dll")] static extern bool EnumWindows(EnumWindow callback, IntPtr data);
+    [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr window);
+    [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr window, out uint pid);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetClassName(IntPtr window, StringBuilder name, int capacity);
+    [StructLayout(LayoutKind.Sequential)] struct Rect { public int Left, Top, Right, Bottom; }
+    [DllImport("user32.dll")] static extern bool GetWindowRect(IntPtr window, out Rect rect);
+    public static double[] Frame(int pid) {
+        double[] frame = null;
+        EnumWindows((window, data) => {
+            uint owner;
+            GetWindowThreadProcessId(window, out owner);
+            if (owner != pid || !IsWindowVisible(window)) return true;
+            var name = new StringBuilder(256);
+            GetClassName(window, name, name.Capacity);
+            if (name.ToString() != "MessagesShortcodePopup") return true;
+            Rect rect;
+            if (!GetWindowRect(window, out rect)) return true;
+            frame = new double[] { 1, rect.Right - rect.Left, rect.Bottom - rect.Top };
+            return false;
+        }, IntPtr.Zero);
+        return frame ?? new double[] { 0, 0, 0 };
+    }
+}
+'@
+
 Send-Keys $session '%2'
 $null = Wait-Until { (Read-Control $session status).view -eq 'slack' } 'Slack sidebar'
 Send-Keys $session '^{TAB}'
@@ -37,4 +68,41 @@ foreach ($stage in @('before', 'after')) {
         Assert-That ($uiaText -cnotmatch [regex]::Escape($fixtureId)) "Fixture Slack id $fixtureId reached UI Automation"
     }
 }
+function Save-MentionFrame($Session, [string]$Name) {
+    $bounds = [System.Windows.Forms.SystemInformation]::VirtualScreen
+    $image = [Drawing.Bitmap]::new($bounds.Width, $bounds.Height)
+    $graphics = [Drawing.Graphics]::FromImage($image)
+    try {
+        $graphics.CopyFromScreen($bounds.Left, $bounds.Top, 0, 0, $bounds.Size)
+        $image.Save((Join-Path $Session.evidence "$Name.png"), [Drawing.Imaging.ImageFormat]::Png)
+    } finally {
+        $graphics.Dispose()
+        $image.Dispose()
+    }
+}
+
+Invoke-PaletteCommand $session 'Compose message'
+Send-Keys $session '@fix'
+$null = Wait-Until { ([VerifyMentionPopup]::Frame([int]$session.pid))[0] -eq 1 } 'Slack mention suggestions'
+$frame = [VerifyMentionPopup]::Frame([int]$session.pid)
+$shown = ($frame[0] -eq 1)
+Assert-That ($shown -and $frame[1] -gt 0 -and $frame[2] -gt 0 -and $frame[2] -lt $frame[1]) 'Mention suggestion list has no usable size'
+$width = [int]$frame[1]
+$height = [int]$frame[2]
+@{ visible = $shown; width = $width; height = $height } | ConvertTo-Json | Set-Content (Join-Path $Evidence 'mention-suggestions.json')
+Save-MentionFrame $session mention-suggestions
+Send-Keys $session '{ENTER}'
+$null = Wait-Until { (Read-Edit $compose) -ceq '<@U4A59H6UT>' } 'Slack mention picked'
+$after = [VerifyMentionPopup]::Frame([int]$session.pid)
+$still_open = ($after[0] -eq 1)
+@{ composer = (Read-Edit $compose); popup = $still_open } | ConvertTo-Json | Set-Content (Join-Path $Evidence 'mention-picked.json')
+Save-Screen $session mention-picked
+Send-Keys $session ' hello'
+Send-Keys $session '{ENTER}'
+$null = Wait-Until {
+    (Read-Control $session status).pending_sends -eq 0 -and
+        @(Read-BridgeRequests $session | Where-Object { $_.wire_path -eq '/v1/wazig/send' -and $_.body.chat -ceq 'slack:fixture-mentions:channel' -and $_.body.text -ceq '<@U4A59H6UT> hello' -and $_.status -eq 200 }).Count -eq 1
+} 'Slack mention send'
+Save-Screen $session mention-sent
+Hub-Pass $session mention-compose
 Hub-Pass $session mention-display
