@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 ROOT="$(git rev-parse --show-toplevel)"
+if grep -q 'check-planted' "$ROOT/tools/map-upkeep.sh"; then
+    echo 'FAIL map-upkeep still runs planted coverage'
+    exit 1
+fi
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 mkdir "$TMP/bin"

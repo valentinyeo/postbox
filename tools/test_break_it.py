@@ -113,6 +113,7 @@ class WorkflowTests(unittest.TestCase):
         self.assertIn("BREAK_IT_API_KEY: ${{ secrets.GROQ_API_KEY }}", step)
         self.assertIn("BREAK_IT_HEAD_SHA: ${{ steps.pr.outputs.head }}", step)
         self.assertIn('run: python3 tools/break_it.py "$PR_NUMBER"', step)
+        self.assertIn("continue-on-error: true", step)
         self.assertNotIn("continue-on-error: false", step)
 
 

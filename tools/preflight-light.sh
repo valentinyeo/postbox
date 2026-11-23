@@ -27,6 +27,7 @@ PYTHON_LIGHT_TESTS=(
     test_palette_archived
     test_pin_icon
     test_postbox
+    test_preexisting_journey
     test_reaction_layout
     test_real_size
     test_recording_paint
@@ -50,7 +51,6 @@ PYTHON_LIGHT_TESTS=(
     test_job_budget
     test_revert_first
     test_verification_job_counts
-    test_base_repro_cache
     test_verify_failure_marker
     test_verify_journeys
     test_voice_language
@@ -73,7 +73,6 @@ run bash tools/test-check-required-checks.sh
 run bash tools/check-feature-map.sh .
 run bash tools/test-check-feature-map.sh
 run bash tools/test-check-pr-proof.sh
-run bash tools/test-check-repro-first.sh
 run bash tools/test-map-upkeep.sh
 run bash tools/check-no-source-text-tests.sh .
 run bash tools/check-no-empty-catch.sh .

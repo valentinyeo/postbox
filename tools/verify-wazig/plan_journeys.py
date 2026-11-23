@@ -1,14 +1,11 @@
-def plan_journeys(files, mapping, journeys, repro=None):
+def plan_journeys(files, mapping, journeys):
     files = list(files)
-    repro = repro if repro and repro != 'none' else None
-    needed = bool(repro) or any(
+    needed = any(
         path.startswith(('src/', 'tools/verify-wazig/'))
         or path in ('build.zig', '.github/workflows/verify.yml')
         for path in files
     )
     names = set(mapping['default']) if needed else set()
-    if repro:
-        names.add(repro)
     for path in files:
         for prefix, features in mapping['paths'].items():
             if path.startswith(prefix):
