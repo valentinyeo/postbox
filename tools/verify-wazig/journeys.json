@@ -973,6 +973,23 @@
         "class": "RealSizeHandler"
       },
       "maximize": true
+    },
+    {
+      "name": "deep-links",
+      "pr": true,
+      "hub": "deep-links",
+      "evidence": true,
+      "chats": 4,
+      "script": "journey-deep-links.ps1",
+      "validator": {
+        "file": "check-deep-links-evidence.py",
+        "function": "check_evidence"
+      },
+      "hub_handler": {
+        "file": "deep-links-fixture.py",
+        "class": "DeepLinksHandler"
+      },
+      "maximize": true
     }
   ]
 }

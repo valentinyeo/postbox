@@ -748,6 +748,13 @@
       "proof": "real-size",
       "status": "covered",
       "why": ""
+    },
+    {
+      "feature": "deep-links",
+      "source": "src/deep_link.zig",
+      "proof": "deep-links",
+      "status": "covered",
+      "why": ""
     }
   ]
 }
