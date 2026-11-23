@@ -5,7 +5,7 @@ on:
   workflow_dispatch:
 concurrency:
   group: release-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 permissions:
   contents: read
 jobs:
@@ -151,3 +151,9 @@ jobs:
         run: |
           gh release create "${GITHUB_REF_NAME}" Messages-*.zip Messages_arm64-*.zip Postbox-*.zip Postbox_arm64-*.zip Postbox-*.msi SHA256SUMS.txt --repo "${GITHUB_REPOSITORY}" --verify-tag --notes-file "$RUNNER_TEMP/release-notes.txt" \
             || { gh release edit "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" --notes-file "$RUNNER_TEMP/release-notes.txt" && gh release upload "${GITHUB_REF_NAME}" Messages-*.zip Messages_arm64-*.zip Postbox-*.zip Postbox_arm64-*.zip Postbox-*.msi SHA256SUMS.txt --repo "${GITHUB_REPOSITORY}" --clobber; }
+      - name: Publish the update check file
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 tools/update_cards.py update-file --repo "$GITHUB_REPOSITORY" --tag "$GITHUB_REF_NAME" > "$RUNNER_TEMP/update.json"
+          gh release upload "${GITHUB_REF_NAME}" "$RUNNER_TEMP/update.json" --repo "$GITHUB_REPOSITORY" --clobber

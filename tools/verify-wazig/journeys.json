@@ -464,7 +464,7 @@
       "pr": true,
       "hub": "read-ticks",
       "evidence": true,
-      "chats": 8,
+      "chats": 11,
       "script": "journey-read-ticks.ps1",
       "validator": {
         "file": "check-read-ticks-evidence.py",
