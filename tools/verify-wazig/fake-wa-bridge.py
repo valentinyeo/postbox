@@ -225,7 +225,7 @@ class Handler(BaseHTTPRequestHandler):
             with state.lock:
                 state.poll_row = dict(
                     stamp=stamp,
-                    message=state.message(ALPHA, 'POLL-ROW', 'Fixture safety poll row', Timestamp=stamp))
+                    message=dict(state.message(ALPHA, 'POLL-ROW', 'Fixture safety poll row'), Timestamp=stamp))
             self.respond(200, {'ok': True, 'stamp': stamp})
         elif self.path == '/v1/send':
             client_id = body.get('client_id', '')
