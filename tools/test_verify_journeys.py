@@ -383,6 +383,36 @@ class JourneyRegistryTests(unittest.TestCase):
                                           capture_output=True).returncode, 0)
 
 
+class HubWakeRefreshEvidenceTests(unittest.TestCase):
+    def setUp(self):
+        self.check = runpy.run_path(str(ROOT / 'tools/verify-wazig/check-hub-wake-refresh-evidence.py'))['check_hub_wake_refresh']
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        self.folder = Path(temp.name)
+        for name, value in {
+            'session.json': {'sha256': 'fixture-hash', 'commit': 'fixture-commit'},
+            'wake-resume.json': {'resume_ms': 37, 'chat_pulls': 4},
+            'safety-poll.json': {'poll_ms': 65000, 'chat_pulls': 6},
+            'poll.messages.json': {'messages': [{'id': 'POLL-ROW'}]},
+        }.items():
+            (self.folder / name).write_text(json.dumps(value))
+        (self.folder / 'hub-proof.log').write_text('hub-wake-refresh wake-resume PASS\nhub-wake-refresh safety-poll PASS\n')
+        (self.folder / 'bridge-requests.jsonl').write_text('\n'.join(json.dumps({'path': path, 'status': 200}) for path in ('/fixture/mute-sse', '/fixture/stale-row')))
+
+    def test_resume_and_another_minute_pull_pass(self):
+        self.check(self.folder)
+
+    def test_resume_pull_alone_is_not_a_minute_pull(self):
+        (self.folder / 'safety-poll.json').write_text(json.dumps({'poll_ms': 65000, 'chat_pulls': 4}))
+        with self.assertRaises(AssertionError):
+            self.check(self.folder)
+
+    def test_zero_counted_resume_pulls_are_rejected(self):
+        (self.folder / 'wake-resume.json').write_text(json.dumps({'resume_ms': 37, 'chat_pulls': 0}))
+        with self.assertRaises(AssertionError):
+            self.check(self.folder)
+
+
 class HubArchiveEvidenceTests(unittest.TestCase):
     def setUp(self):
         self.checker = runpy.run_path(str(ROOT / 'tools/verify-wazig/check-hub-archive-evidence.py'))

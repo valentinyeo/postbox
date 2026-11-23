@@ -13,18 +13,18 @@ $null = Wait-Until {
     @((Read-Control $session messages).messages | Where-Object id -eq 'POLL-ROW').Count -eq 1
 } 'resume refresh delivered poll row' 15
 $resumeMs = ([DateTime]::UtcNow - $resumeStart).TotalMilliseconds
-@{ resume_ms = $resumeMs; chat_pulls = @(Read-BridgeRequests $session | Where-Object { $_.path -eq '/v1/chats?' -and $_.status -eq 200 }).Count } | ConvertTo-Json | Set-Content (Join-Path $session.evidence 'wake-resume.json')
+@{ resume_ms = $resumeMs; chat_pulls = @(Read-BridgeRequests $session | Where-Object { $_.path.StartsWith('/v1/chats?') -and $_.status -eq 200 }).Count } | ConvertTo-Json | Set-Content (Join-Path $session.evidence 'wake-resume.json')
 Assert-That ($resumeMs -lt 15000) 'Simulated resume refresh exceeded fifteen seconds'
 Hub-Pass $session wake-resume
-$beforeChats = @(Read-BridgeRequests $session | Where-Object { $_.path -eq '/v1/chats?' -and $_.status -eq 200 }).Count
+$beforeChats = @(Read-BridgeRequests $session | Where-Object { $_.path.StartsWith('/v1/chats?') -and $_.status -eq 200 }).Count
 Invoke-RestMethod -Method Post -Uri "$($session.bridge_url)/fixture/stale-row" -Headers $headers -Body '{}' -ContentType 'application/json' | Out-Null
 $pollStart = [DateTime]::UtcNow
 Start-Sleep -Seconds 65
 $null = Wait-Until {
-    @(Read-BridgeRequests $session | Where-Object { $_.path -eq '/v1/chats?' -and $_.status -eq 200 }).Count -gt $beforeChats
+    @(Read-BridgeRequests $session | Where-Object { $_.path.StartsWith('/v1/chats?') -and $_.status -eq 200 }).Count -gt $beforeChats
 } 'safety poll refreshed inbox without SSE' 10
 $pollMs = ([DateTime]::UtcNow - $pollStart).TotalMilliseconds
-$chatPulls = @(Read-BridgeRequests $session | Where-Object { $_.path -eq '/v1/chats?' -and $_.status -eq 200 })
+$chatPulls = @(Read-BridgeRequests $session | Where-Object { $_.path.StartsWith('/v1/chats?') -and $_.status -eq 200 })
 @{ poll_ms = $pollMs; chat_pulls = $chatPulls.Count } | ConvertTo-Json | Set-Content (Join-Path $session.evidence 'safety-poll.json')
 Assert-That ($pollMs -le 75000) 'Safety poll exceeded seventy-five seconds'
 $sseLive = @(Read-BridgeRequests $session | Where-Object { $_.path -eq '/v1/events' -and $_.id -eq '2' })
