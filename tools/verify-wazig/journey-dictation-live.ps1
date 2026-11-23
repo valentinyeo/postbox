@@ -27,7 +27,10 @@ foreach ($case in $cases) {
     $null = Wait-Until { -not (Read-Control $session status).dictation.draining } 'previous live worker drained'
     Invoke-PaletteCommand $session "Dictation language: $($case.label)"
     Invoke-PaletteCommand $session 'Compose message'
-    Send-Keys $session '^aBefore after^{HOME}{RIGHT 6}'
+    Send-Keys $session '^a{BACKSPACE}'
+    Send-Keys $session 'Before after'
+    Send-Keys $session '^{HOME}{RIGHT 6}'
+    $null = Wait-Until { (Read-Edit (Live-Composer)) -ceq 'Before after' } 'original composer text typed'
     $original = Read-Edit (Live-Composer)
     Assert-That ($original -ceq 'Before after') 'Original composer text missing'
     $before = Read-Control $session status
