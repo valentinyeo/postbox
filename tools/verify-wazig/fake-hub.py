@@ -1261,19 +1261,73 @@ class SlackThreadBroadcastHandler(SlackThreadsHandler):
 
 
 TICK_CHATS = [
-    dict(jid='ticks-read@s.whatsapp.net', name='Verification Read', provider='whatsapp', kind='direct', read_by=1),
-    dict(jid='ticks-sent@s.whatsapp.net', name='Verification Sent', provider='whatsapp', kind='direct', read_by=0),
-    dict(jid='ticks-late@s.whatsapp.net', name='Verification Late', provider='whatsapp', kind='direct', read_by=0, older_read_by=1),
-    dict(jid='ticks-group@g.us', name='Verification Group', provider='whatsapp', kind='group', read_by=2),
-    dict(jid='slack:fixture-ticks:channel', name='Verification Slack', provider='slack', kind='direct', read_by=1),
-    dict(jid='signal:ticks-contact', name='Verification Signal Contact', provider='signal', kind='direct', read_by=1),
-    dict(jid='signal:group:ticks-group', name='Verification Signal Crowd', provider='signal', kind='group', read_by=2),
-    dict(jid='telegram:user:ticks-contact', name='Verification Telegram Contact', provider='telegram', kind='direct', read_by=1),
-    dict(jid='telegram:user:ticks-unread', name='Verification Telegram Fresh', provider='telegram', kind='direct', read_by=0),
+    dict(jid='ticks-read@s.whatsapp.net', name='Verification Read', provider='whatsapp', kind='direct', delivered_to=1, read_by=1),
+    dict(jid='ticks-delivered@s.whatsapp.net', name='Verification Delivered', provider='whatsapp', kind='direct', delivered_to=1, read_by=0),
+    dict(jid='ticks-sent@s.whatsapp.net', name='Verification Sent', provider='whatsapp', kind='direct', delivered_to=0, read_by=0),
+    dict(jid='ticks-late@s.whatsapp.net', name='Verification Late', provider='whatsapp', kind='direct', delivered_to=1, read_by=0, older_read_by=1),
+    dict(jid='ticks-group@g.us', name='Verification Group', provider='whatsapp', kind='group', delivered_to=3, read_by=2),
+    dict(jid='slack:fixture-ticks:channel', name='Verification Slack', provider='slack', kind='direct', delivered_to=1, read_by=1),
+    dict(jid='signal:ticks-contact', name='Verification Signal Contact', provider='signal', kind='direct', delivered_to=0, read_by=1),
+    dict(jid='signal:group:ticks-group', name='Verification Signal Crowd', provider='signal', kind='group', delivered_to=2, read_by=2),
+    dict(jid='telegram:user:ticks-contact', name='Verification Telegram Contact', provider='telegram', kind='direct', delivered_to=0, read_by=1),
+    dict(jid='telegram:user:ticks-unread', name='Verification Telegram Fresh', provider='telegram', kind='direct', delivered_to=0, read_by=0),
+    dict(jid='ticks-hold@s.whatsapp.net', name='Verification Hold', provider='whatsapp', kind='direct', delivered_to=1, read_by=0),
 ]
+
+TICK_HOLD_ROWS = 40
+
+
+def tick_hold_rows(jid, read):
+    stamp = datetime(2025, 2, 19, 21, 30, tzinfo=timezone.utc)
+    rows = []
+    for number in range(TICK_HOLD_ROWS):
+        own = number % 3 == 1 or number == TICK_HOLD_ROWS - 1
+        rows.append(dict(MsgID=f'hold-{number:02d}', ChatJID=jid, FromMe=own,
+                         Timestamp=(stamp + timedelta(minutes=number)).isoformat().replace('+00:00', 'Z'),
+                         Text=f'Synthetic hold line {number:02d}',
+                         SenderName='Me' if own else 'Fixture Sender', ReadBy=0,
+                         DeliveredTo=chat_delivered_to(jid, own)))
+    if read:
+        rows[-1]['ReadBy'] = 1
+    return rows
+
+
+def chat_delivered_to(jid, own):
+    chat = next((row for row in TICK_CHATS if row['jid'] == jid), None)
+    return chat['delivered_to'] if own and chat is not None else 0
 
 
 class ReadTicksHandler(SlackSortHandler):
+    def events(self):
+        self.record(200)
+        self.send_response(200)
+        self.send_header('Content-Type', 'text/event-stream')
+        self.send_header('Cache-Control', 'no-cache')
+        self.send_header('Connection', 'close')
+        self.end_headers()
+        last = int(self.headers.get('Last-Event-ID', '0'))
+        if last == 0:
+            self.event(1, 'reset', '')
+            self.close_connection = True
+            return
+        while True:
+            with self.state.lock:
+                pending = [(index + 2, event) for index, event in enumerate(self.state.ticks_events) if index + 2 > last]
+                if not pending:
+                    self.state.lock.wait(timeout=2)
+            if pending:
+                for event_id, (kind, chat) in pending:
+                    self.event(event_id, kind, chat)
+                self.close_connection = True
+                return
+            self.wfile.write(b': heartbeat\n\n')
+            self.wfile.flush()
+
+    def publish(self, kind, chat):
+        with self.state.lock:
+            self.state.ticks_events.append((kind, chat))
+            self.state.lock.notify_all()
+
     def do_GET(self):
         self.wire_path = self.path
         if not self.authorized():
@@ -1290,13 +1344,21 @@ class ReadTicksHandler(SlackSortHandler):
             if chat is None:
                 self.respond(404, {'error': 'unknown fixture chat'})
                 return
+            if chat['jid'] == 'ticks-hold@s.whatsapp.net':
+                with self.state.lock:
+                    read = self.state.ticks_read
+                rows = list(reversed(tick_hold_rows(chat['jid'], read)))
+                self.respond(200, rows)
+                return
             rows = [dict(MsgID='tick-own', ChatJID=chat['jid'], Timestamp='2025-02-19T21:20:30Z', FromMe=True,
-                         Text='Synthetic message you sent', SenderName='Me', ReadBy=chat['read_by']),
-                    dict(MsgID='tick-in', ChatJID=chat['jid'], Timestamp='2025-02-19T21:20:10Z', FromMe=False,
-                         Text='Synthetic message you received', SenderName='Fixture Sender', ReadBy=0)]
-            if chat.get('older_read_by'):
-                rows.append(dict(MsgID='tick-read', ChatJID=chat['jid'], Timestamp='2025-02-19T21:19:50Z', FromMe=True,
-                                 Text='Earlier message already read', SenderName='Me', ReadBy=chat['older_read_by']))
+                         Text='Synthetic message you sent', SenderName='Me', ReadBy=chat['read_by'],
+                         DeliveredTo=chat['delivered_to']),
+                    dict(MsgID='tick-in', ChatJID=chat['jid'], Timestamp='2025-02-19T21:20:20Z', FromMe=False,
+                         Text='Synthetic message you received', SenderName='Fixture Sender', ReadBy=0, DeliveredTo=0)]
+            if 'older_read_by' in chat:
+                rows.append(dict(MsgID='tick-old', ChatJID=chat['jid'], Timestamp='2025-02-19T21:20:10Z', FromMe=True,
+                                 Text='Synthetic message you sent earlier', SenderName='Me', ReadBy=chat['older_read_by'],
+                                 DeliveredTo=chat['delivered_to']))
             self.respond(200, rows)
         elif url.path == '/v1/wazig/events':
             self.events()
@@ -1312,6 +1374,11 @@ class ReadTicksHandler(SlackSortHandler):
         body = json.loads(self.rfile.read(int(self.headers.get('Content-Length', '0'))) or '{}')
         if self.path == '/v1/wazig/mark-read':
             self.respond(200, {'status': 'ok'}, body=body)
+        elif self.path == '/fixture/ticks/read':
+            with self.state.lock:
+                self.state.ticks_read = True
+            self.publish('msg', 'ticks-hold@s.whatsapp.net')
+            self.respond(200, {'read': True}, body=body)
         else:
             self.respond(400, {'error': 'invalid read tick request'}, body=body)
 
@@ -2752,6 +2819,8 @@ def main():
     server.state.telegram_events = []
     server.state.telegram_read = set()
     server.state.gif_attempts = {}
+    server.state.ticks_read = False
+    server.state.ticks_events = []
     if args.mode == 'voice':
         server.state.voice_audio = voice_playback_bytes()
     if args.mode == 'media-speed':

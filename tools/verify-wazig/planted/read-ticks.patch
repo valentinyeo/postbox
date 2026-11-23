@@ -1,12 +1,13 @@
 diff --git a/src/read_receipt.zig b/src/read_receipt.zig
+index 5c8d782..331ab4b 100644
 --- a/src/read_receipt.zig
 +++ b/src/read_receipt.zig
-@@ -5,7 +5,7 @@
- pub fn shows(capability: Capability, from_me: bool, sent: bool, revoked: bool, read_by: i64) bool {
-     if (!from_me or !sent or revoked) return false;
-     return switch (capability) {
--        .whatsapp_dm, .telegram_dm, .signal_dm => read_by >= 1,
-+        .whatsapp_dm, .telegram_dm, .signal_dm => read_by > 1,
-         .whatsapp_group, .slack, .telegram, .signal => false,
-     };
+@@ -22,7 +22,7 @@ pub fn ticks(state: Status) usize {
+ }
+ 
+ fn direct(delivered: i64, read_by: i64) Status {
+-    if (read_by >= 1) return .read;
++    if (read_by > 1) return .read;
+     if (delivered >= 1) return .delivered;
+     return .sent;
  }

@@ -54,7 +54,7 @@ fn transcribeAt(allocator: std.mem.Allocator, key: []const u8, _: [*:0]const u16
     if (cancel_during_request) |session| session.phase = .cancelled;
     if (fixture_failure) |err| return err;
     if (std.mem.eql(u8, key, "inherited-value") or reject_replacement) return error.Unauthorized;
-    return allocator.dupe(u8, "transcript");
+    return allocator.dupe(u8, "{\"results\":{\"channels\":[{\"detected_language\":\"en\",\"alternatives\":[{\"transcript\":\"transcript\",\"confidence\":0.9}]}]}}");
 }
 fn reset() void {
     calls = 0;

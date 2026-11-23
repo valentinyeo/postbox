@@ -35,7 +35,8 @@ def check_reports(workflows):
 def check_release(auto, release):
     assert set(auto[True]) == {'push', 'workflow_dispatch'}
     assert auto[True]['push']['branches'] == ['main']
-    assert auto['concurrency']['cancel-in-progress'] is False
+    assert auto['concurrency']['cancel-in-progress'] is True
+    assert auto['concurrency']['group'] == 'auto-release-${{ github.ref }}'
     steps = auto['jobs']['tag']['steps']
     by_name = {step.get('name'): step for step in steps}
     guard = by_name['Require main ref']['run']
@@ -82,6 +83,8 @@ def check_release(auto, release):
     for fragment in ('release-bundle', 'gh release create', '--verify-tag', 'gh release upload', 'SHA256SUMS.txt'):
         assert fragment in publish
     assert jobs['release']['permissions']['contents'] == 'write'
+    assert release['concurrency']['group'] == 'release-${{ github.ref }}'
+    assert release['concurrency']['cancel-in-progress'] is True
 
 
 class WorkflowContractTests(unittest.TestCase):
