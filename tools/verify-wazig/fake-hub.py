@@ -1119,6 +1119,8 @@ class SlackMentionsHandler(SlackSortHandler):
             self.respond(200, {'status': 'ok'}, body=body)
         elif self.path == '/v1/wazig/send' and body.get('chat') == MENTIONS_CHAT:
             stamp = (datetime.fromisoformat(self.state.stamp) + timedelta(seconds=1)).isoformat().replace('+00:00', 'Z')
+            with self.state.lock:
+                self.state.sends[body['client_id']] = dict(body, msg_id='MENTION-SENT', ts=stamp)
             self.respond(200, dict(client_id=body.get('client_id'), msg_id='MENTION-SENT', ts=stamp, status='sent'), body=body)
         else:
             self.respond(400, {'error': 'invalid mention request'}, body=body)
@@ -1143,6 +1145,10 @@ class SlackMentionsHandler(SlackSortHandler):
             rows = [dict(MsgID=message_id, ChatJID=MENTIONS_CHAT, Timestamp=f'2025-02-19T21:20:{index:02d}Z',
                          Text=text, FromMe=False, SenderName=names[user], SenderJID=user)
                     for index, (message_id, user, text) in enumerate(texts)]
+            with self.state.lock:
+                rows.extend(dict(MsgID=sent['msg_id'], ChatJID=sent['chat'], Timestamp=sent['ts'],
+                                 Text=sent['text'], FromMe=True, SenderName='You', SenderJID='UFIXTURESELF')
+                            for sent in self.state.sends.values() if sent['chat'] == MENTIONS_CHAT)
             self.respond(200, list(reversed(rows)), members=MENTIONS_MEMBERS, users_info=MENTIONS_INFO, rows=rows)
         elif url.path == '/v1/wazig/events':
             self.events()

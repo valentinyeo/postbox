@@ -1,12 +1,12 @@
 # Wazig verification map
 
-Start with [the skill](../SKILL.md). The offline desktop journeys use the real native window, not the existing headless smoke modes. Each run creates a separate profile and synthetic cached chats `Verification Alpha` and `Verification Beta`, without provider login. Menus seeds one synthetic cached message to reach both message menus; text-comparison loads its synthetic paragraph from `src/verify_text.json`. The baseline is the AMOLED theme, saved-scale default of 82%, All networks, Alpha selected and an empty composer. Never change the product's default font or scale to suit the harness.
+Start with [the skill](../SKILL.md). The offline desktop journeys use the real native window, not the existing headless smoke modes. Each run creates a separate profile and synthetic cached chats `Verification Alpha` and `Verification Beta`, without provider login. Menus seeds one synthetic cached message to reach both message menus; text-comparison loads its synthetic paragraph from `src/verify_text.json`. The baseline is the Graphite theme (internal name `amoled`), saved-scale default of 100%, combined inbox, Alpha selected and an empty composer. Never change the product's default font or scale to suit the harness.
 
-Journey IDs, automatic PR coverage and fixture modes are defined in [journeys.json](../../../../tools/verify-wazig/journeys.json). Read `features/<name>.md` for each registered journey's user-facing recipe. Add a journey through one registry entry and its own files; do not maintain another catalog here.
+Journey IDs, automatic PR coverage and fixture modes are defined in [journeys.json](../../../../tools/verify-wazig/journeys.json). Read `features/<name>.md` for each registered journey's user-facing recipe, except `real-size`, whose sole guide is in [FEATURE-MAP.md](../../../../tools/verify-wazig/FEATURE-MAP.md#journey-real-size). Add a journey through one registry entry and its own files; do not maintain another catalog here.
 
 Harness name in each map: `PowerShell UI Automation`. Dispatch with `gh workflow run verify.yml -f feature=<ID>`, watch with `--interval 60`, download `verify-wazig-<ID>` and inspect the images. Other than registered automatic PR coverage, journeys remain dispatchable; never claim skipped coverage as verification.
 
-The source of truth for commands is `src/main.zig:buildPaletteItems`, for keyboard handling `src/main.zig:handleKeyboard`, and for discoverable help `src/shortcuts.zig`. Every feature file has precisely four H2 sections. Capture the input, resulting UI and durable side effects; preserve proof after cleanup. Only archive adds a synthetic incoming message at the fixture provider boundary; search, navigation, drafts, palette and appearance stay empty. No live send, account login, media, voice playback or transcription claim can be made from these local chats.
+The source of truth for commands is `src/main.zig:buildPaletteItems`, for keyboard handling `src/main.zig:handleKeyboard`, and for discoverable help `src/shortcuts.zig`. Every feature file has precisely four H2 sections. Capture the input, resulting UI and durable side effects; preserve proof after cleanup. Fixture modes and initial rows differ by journey; search uses synthetic hub histories and appearance replays recorded dictation. Navigation, drafts and palette use offline cached chats. Synthetic hub sends, media and recorded transcription do not prove provider delivery, account login or acoustic recognition.
 
 The hub journey uses a loopback fake bridge with synthetic rows instead of the offline chat seed. Its real app worker and WinHTTP reader run in the same isolated profile. It proves transport behavior against the frozen contract, not a live account or service deployment.
 
@@ -15,6 +15,28 @@ The `hub` journey uses the unified `/v1/wazig` contract and synthetic Slack/What
 The `slack-sort` journey verifies Slack last message ordering and incoming/sent promotion through the unified fake hub, and runs on matching PRs.
 
 The `workspace-icons` journey verifies rounded Slack workspace icon badges, the missing-icon S fallback and the green WhatsApp handset through screenshot pixel checks, authenticated synthetic endpoints and retained disk caches. It runs on matching PRs.
+
+## Thirty-day source sweep
+
+Window: 2026-10-24 through 2026-11-23, ending at `291191a`. These are source dispositions, not live-pass results.
+
+| Recent change | Source | Journey or missing prerequisite |
+|---|---|---|
+| `e360ea7`: Slack autocomplete | `src/main.zig:11248`, `src/mention_index.zig:66` | `slack-mentions` requires the visible popup, exact token and sent payload; the duplicate hub text-change probe is retired. |
+| `6f3db97`: per-chat Slack Replies choice | `src/main.zig:24826` | `slack-threads` checks both saved chat styles against the account default. |
+| `febf904`, `2995401`: Read mark and chat isolation | `src/main.zig:18119`, `src/read_receipt.zig:18` | `read-ticks`; the older-read/newest-unread case caught the newest-own-only selection bug, which #561 fixed. The journey keeps that case: the newest own message stays delivered while the older one shows blue. |
+| `528e4e7`: loaded page thumbnail | `src/main.zig:8657`, `src/unfurl.zig` | `link-previews` checks card-image pixels. |
+| `eda5db7`: voice pill, message grouping and link-card redesign | `src/chat_screen.zig:27`, `src/chat_screen.zig:110`, `src/main.zig:22668` | Existing voice and link journeys cover their original assertions; the title-adjacent pill, Today line and one timestamp per sender group still need dedicated screenshot measurements. |
+| `ee076a1`: native new-message toasts, no tray | `src/toast.zig:195`, `src/toast.zig:216`, `src/main.zig:3023` | Unreachable in the current recipes: need a hosted notification-center capture and real activation input tied to a synthetic incoming message. An accepted notification API call alone is not visible proof. |
+| `16e332e`: redesigned update card | `src/main.zig:22718` | `quiet-status` exercises sync errors only; update-ready, downloading, staged and restart states need a pending-release fixture and screenshot assertions. Ordinary fixture startup suppresses update checks. |
+| `afac62f`: caret after emoji | `src/directwrite_edit.zig:192` | `caret` currently types ASCII; emoji caret alignment needs a mixed-text fixture and a measured glyph-edge oracle. |
+| `c12336f`, `180e120`: colour emoji in sidebar and reply preview | `src/emoji_draw.zig`, `src/main.zig:11211` | Picker glyph coverage is not sidebar/reply colour proof; need screenshot crops containing known colour glyphs. |
+| `643cc56`: stalled media download and retry | `src/media_drain.zig:112`, `src/media_drain.zig:122` | `media-speed` covers gone and server-error responses, not a never-answering download followed by a manual retry. Need a held media response and visible failure/retry capture. |
+| `907bf17`, `c8fe402`: sent image shown while upload is pending | `src/main.zig:4528`, `src/main.zig:10832` | `paste-image` proves staged and acknowledged images, not the interval before acknowledgement; need a held upload and pending-bubble pixel assertion. |
+| `e06be2d`, `7b593ed`, `a96e074`: thread broadcast, panel and orphan replies | `src/main.zig:24925`, `src/main.zig:25008`, `src/main.zig:24837` | `slack-thread-broadcast` and `slack-threads` use quoted-message-only hub rows and check sent payloads, folding and restart. |
+| `d506159`, `52bc120`: deletion and manual resend | `src/main.zig:5840`, `src/main.zig:5875` | `hub` and `hub-fault` check exact request identities and restored failed bubbles. |
+| `500ddc4`, `460e2a0`: archive return and retained intent | `src/main.zig:14216`, `src/main.zig:14525` | `archive-return`, `slack-archive`, `hub-archive` and `archive-inbox` retain their separate provider/local contracts. |
+| `b11fd97`, `521b4ab`, `727d046`: composer reveal, keyboard reply and chat-number keys | `src/directwrite_edit.zig`, `src/main.zig:20836`, `src/shortcuts.zig` | `drafts`, `reply`, `ctrl-badges` and `notrap`; keyboard reply now checks the exact focused-message first line rather than nonempty text. |
 
 ## Recent changes coverage
 

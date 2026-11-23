@@ -89,6 +89,14 @@ def check_slack_mentions(folder):
     sends = [row for row in api if urlsplit(row['wire_path']).path == '/v1/wazig/send']
     assert len(sends) == 1 and sends[0]['status'] == 200 and sends[0]['authorized']
     assert sends[0]['body']['chat'] == chat and sends[0]['body']['text'] == '<@U4A59H6UT> hello'
+    sent_history = read('mention-sent.messages.json')
+    assert sent_history['chat']['id'] == chat and len(sent_history['messages']) == 6
+    own, = [row for row in sent_history['messages'] if row['from_me']]
+    assert own['id'] == 'MENTION-SENT' and own['text'] == '@Fixture Peer hello'
+    assert own['bubble'][2] > own['bubble'][0]
+    assert all('<@' not in row['text'] for row in sent_history['messages'])
+    echoes = [row for history in histories for row in history['rows'] if row['MsgID'] == 'MENTION-SENT']
+    assert echoes and all(row['FromMe'] and row['Text'] == sends[0]['body']['text'] for row in echoes)
     for name in ['mention-suggestions.png', 'mention-picked.png', 'mention-sent.png']:
         image = (folder / name).read_bytes()
         assert image.startswith(b'\x89PNG\r\n\x1a\n') and len(image) > 10000
