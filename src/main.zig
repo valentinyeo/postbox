@@ -20507,10 +20507,9 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                 if (a.compose) |compose| {
                     if (win.GetWindowTextLengthW(compose) == 0) a.compose_dragged = 0;
                 }
-                const mention_shown = updateMentionPopup(a);
                 saveComposerDraft(a);
                 layoutComposer(a);
-                if (!mention_shown) shortcodeUpdate(a);
+                if (!updateMentionPopup(a)) shortcodeUpdate(a);
             }
             return 0;
         },
