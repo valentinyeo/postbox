@@ -708,6 +708,13 @@
       "why": ""
     },
     {
+      "feature": "mention-autocomplete",
+      "source": "src:mention-autocomplete",
+      "proof": "slack-mentions",
+      "status": "covered",
+      "why": ""
+    },
+    {
       "feature": "view-switching",
       "source": "src:views",
       "proof": "views",
