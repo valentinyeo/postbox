@@ -4,10 +4,78 @@ pub const Language = enum(u8) { automatic, english, german };
 
 pub fn path(comptime language: Language) []const u8 {
     return switch (language) {
-        .automatic => "/v1/listen?model=nova-3&smart_format=true&detect_language=true&tag=wazig",
+        .automatic => "/v1/listen?model=nova-3&smart_format=true&detect_language=en&detect_language=de&tag=wazig",
         .english => "/v1/listen?model=nova-3&smart_format=true&language=en&tag=wazig",
         .german => "/v1/listen?model=nova-3&smart_format=true&language=de&tag=wazig",
     };
+}
+
+pub const Recognition = struct {
+    text: []u8,
+    language: ?Language,
+    confidence: f64,
+};
+
+pub fn transcribeSupported(transport: anytype, language: Language, content_type: []const u8, body: []const u8) ![]u8 {
+    const result = try transport.recognize(language, content_type, body);
+    if (language != .automatic or result.language != null) return result.text;
+    transport.allocator.free(result.text);
+    const english = transport.recognize(.english, content_type, body) catch |err| if (err == error.NoSpeech) null else return err;
+    defer if (english) |value| transport.allocator.free(value.text);
+    const german = transport.recognize(.german, content_type, body) catch |err| if (err == error.NoSpeech) null else return err;
+    defer if (german) |value| transport.allocator.free(value.text);
+    const chosen = if (english) |en|
+        if (german) |de| (if (de.confidence > en.confidence) de else en) else en
+    else
+        german orelse return error.NoSpeech;
+    return transport.allocator.dupe(u8, chosen.text);
+}
+
+pub fn parseResponse(allocator: std.mem.Allocator, response: []const u8) !Recognition {
+    var parsed = try std.json.parseFromSlice(std.json.Value, allocator, response, .{});
+    defer parsed.deinit();
+    const root = switch (parsed.value) {
+        .object => |value| value,
+        else => return error.BadResponse,
+    };
+    const results = switch (root.get("results") orelse return error.BadResponse) {
+        .object => |value| value,
+        else => return error.BadResponse,
+    };
+    const channels = switch (results.get("channels") orelse return error.BadResponse) {
+        .array => |value| value,
+        else => return error.BadResponse,
+    };
+    if (channels.items.len == 0) return error.NoSpeech;
+    const channel = switch (channels.items[0]) {
+        .object => |value| value,
+        else => return error.BadResponse,
+    };
+    const alternatives = switch (channel.get("alternatives") orelse return error.BadResponse) {
+        .array => |value| value,
+        else => return error.BadResponse,
+    };
+    if (alternatives.items.len == 0) return error.NoSpeech;
+    const alternative = switch (alternatives.items[0]) {
+        .object => |value| value,
+        else => return error.BadResponse,
+    };
+    const transcript = switch (alternative.get("transcript") orelse return error.BadResponse) {
+        .string => |value| value,
+        else => return error.BadResponse,
+    };
+    if (transcript.len == 0) return error.NoSpeech;
+    const detected = channel.get("detected_language");
+    const code = if (detected != null and detected.? == .string) detected.?.string else "";
+    const primary = code[0 .. std.mem.indexOfScalar(u8, code, '-') orelse code.len];
+    const language: ?Language = if (std.mem.eql(u8, primary, "en")) .english else if (std.mem.eql(u8, primary, "de")) .german else null;
+    const score = alternative.get("confidence");
+    const confidence: f64 = if (score) |value| switch (value) {
+        .float => |number| number,
+        .integer => |number| @floatFromInt(number),
+        else => 0,
+    } else 0;
+    return .{ .text = try allocator.dupe(u8, transcript), .language = language, .confidence = confidence };
 }
 
 pub fn hasSpeech(wav: []const u8) bool {
@@ -105,6 +173,122 @@ pub fn failureText(failure: anyerror) []const u8 {
         error.TranscriptionUnavailable => "Transcription service unavailable",
         else => "Transcription failed",
     };
+}
+
+const FakeRecognitionTransport = struct {
+    allocator: std.mem.Allocator = std.testing.allocator,
+    responses: []const []const u8,
+    calls: usize = 0,
+    languages: [3]?Language = .{ null, null, null },
+    failure_at: ?usize = null,
+
+    pub fn recognize(self: *@This(), language: Language, content_type: []const u8, body: []const u8) !Recognition {
+        try std.testing.expectEqualStrings("audio/wav", content_type);
+        try std.testing.expectEqualStrings("synthetic recording", body);
+        if (self.calls >= self.languages.len) return error.UnexpectedRequest;
+        self.languages[self.calls] = language;
+        self.calls += 1;
+        if (self.failure_at == self.calls) return error.NetworkFailed;
+        if (self.calls > self.responses.len) return error.UnexpectedRequest;
+        return parseResponse(self.allocator, self.responses[self.calls - 1]);
+    }
+
+    pub fn send(self: *@This(), language: Language, content_type: []const u8, body: []const u8) ![]u8 {
+        return transcribeSupported(self, language, content_type, body);
+    }
+};
+
+fn recognitionResponse(comptime language: []const u8, comptime text: []const u8, comptime confidence: []const u8) []const u8 {
+    return "{\"results\":{\"channels\":[{\"detected_language\":" ++ language ++ ",\"alternatives\":[{\"transcript\":\"" ++ text ++ "\",\"confidence\":" ++ confidence ++ "}]}]}}";
+}
+
+test "automatic dictation accepts only English and German detection without retry" {
+    inline for (.{ "\"en\"", "\"de\"", "\"en-GB\"", "\"de-CH\"" }) |language| {
+        var transport: FakeRecognitionTransport = .{ .responses = &.{recognitionResponse(language, "recognized speech", "0.9")} };
+        const text = try transcribe(&transport, .automatic, "audio/wav", "synthetic recording");
+        defer transport.allocator.free(text);
+        try std.testing.expectEqualStrings("recognized speech", text);
+        try std.testing.expectEqual(@as(usize, 1), transport.calls);
+        try std.testing.expectEqual(Language.automatic, transport.languages[0].?);
+    }
+}
+
+test "unsupported or missing automatic language chooses the better English or German recognition" {
+    inline for (.{
+        recognitionResponse("\"tr\"", "unsupported transcript", "0.99"),
+        recognitionResponse("\"fr\"", "unsupported transcript", "0.99"),
+        recognitionResponse("null", "unsupported transcript", "0.99"),
+        "{\"results\":{\"channels\":[{\"alternatives\":[{\"transcript\":\"unsupported transcript\"}]}]}}",
+    }) |response| {
+        inline for (.{ false, true }) |prefer_german| {
+            var transport: FakeRecognitionTransport = .{ .responses = &.{
+                response,
+                recognitionResponse("null", "English result", if (prefer_german) "0.4" else "0.9"),
+                recognitionResponse("null", "German result", if (prefer_german) "0.9" else "0.4"),
+            } };
+            const text = try transcribe(&transport, .automatic, "audio/wav", "synthetic recording");
+            defer transport.allocator.free(text);
+            try std.testing.expectEqualStrings(if (prefer_german) "German result" else "English result", text);
+            try std.testing.expectEqualSlices(?Language, &.{ .automatic, .english, .german }, &transport.languages);
+            try std.testing.expectEqual(@as(usize, 3), transport.calls);
+        }
+    }
+}
+
+test "fixed dictation languages preserve their response without detection or retry" {
+    for ([_]Language{ .english, .german }) |language| {
+        var transport: FakeRecognitionTransport = .{ .responses = &.{recognitionResponse("null", "fixed result", "1")} };
+        const text = try transcribe(&transport, language, "audio/wav", "synthetic recording");
+        defer transport.allocator.free(text);
+        try std.testing.expectEqualStrings("fixed result", text);
+        try std.testing.expectEqual(@as(usize, 1), transport.calls);
+        try std.testing.expectEqual(language, transport.languages[0].?);
+    }
+}
+
+test "automatic fallback handles empty candidates and ties without leaking unsupported text" {
+    inline for (.{ false, true }) |empty_english| {
+        var transport: FakeRecognitionTransport = .{ .responses = &.{
+            recognitionResponse("\"tr\"", "unsupported transcript", "1"),
+            recognitionResponse("null", if (empty_english) "" else "English result", "0.5"),
+            recognitionResponse("null", if (empty_english) "German result" else "", "0.5"),
+        } };
+        const text = try transcribe(&transport, .automatic, "audio/wav", "synthetic recording");
+        defer transport.allocator.free(text);
+        try std.testing.expectEqualStrings(if (empty_english) "German result" else "English result", text);
+    }
+    var tie: FakeRecognitionTransport = .{ .responses = &.{
+        recognitionResponse("\"tr\"", "unsupported transcript", "1"),
+        recognitionResponse("null", "English result", "0.5"),
+        recognitionResponse("null", "German result", "0.5"),
+    } };
+    const text = try transcribe(&tie, .automatic, "audio/wav", "synthetic recording");
+    defer tie.allocator.free(text);
+    try std.testing.expectEqualStrings("English result", text);
+    var empty: FakeRecognitionTransport = .{ .responses = &.{
+        recognitionResponse("\"tr\"", "unsupported transcript", "1"),
+        recognitionResponse("null", "", "0"),
+        recognitionResponse("null", "", "0"),
+    } };
+    try std.testing.expectError(error.NoSpeech, transcribe(&empty, .automatic, "audio/wav", "synthetic recording"));
+}
+
+test "automatic fallback propagates network errors and malformed responses" {
+    for (1..4) |attempt| {
+        var transport: FakeRecognitionTransport = .{
+            .responses = &.{
+                recognitionResponse("\"tr\"", "unsupported transcript", "1"),
+                recognitionResponse("null", "English result", "0.5"),
+                recognitionResponse("null", "German result", "0.5"),
+            },
+            .failure_at = attempt,
+        };
+        try std.testing.expectError(error.NetworkFailed, transcribe(&transport, .automatic, "audio/wav", "synthetic recording"));
+        try std.testing.expectEqual(attempt, transport.calls);
+    }
+    var malformed: FakeRecognitionTransport = .{ .responses = &.{"{}"} };
+    try std.testing.expectError(error.BadResponse, transcribe(&malformed, .automatic, "audio/wav", "synthetic recording"));
+    try std.testing.expectEqual(@as(usize, 1), malformed.calls);
 }
 
 const FakeTransport = struct {
@@ -250,7 +434,7 @@ test "all request paths preserve language and model settings and end with wazig 
         try std.testing.expect(std.mem.endsWith(u8, path(language), "&tag=wazig"));
         try std.testing.expect(std.mem.indexOf(u8, path(language), "language=multi") == null);
     }
-    try std.testing.expectEqualStrings("/v1/listen?model=nova-3&smart_format=true&detect_language=true&tag=wazig", path(.automatic));
+    try std.testing.expectEqualStrings("/v1/listen?model=nova-3&smart_format=true&detect_language=en&detect_language=de&tag=wazig", path(.automatic));
     try std.testing.expectEqualStrings("/v1/listen?model=nova-3&smart_format=true&language=en&tag=wazig", path(.english));
     try std.testing.expectEqualStrings("/v1/listen?model=nova-3&smart_format=true&language=de&tag=wazig", path(.german));
 }

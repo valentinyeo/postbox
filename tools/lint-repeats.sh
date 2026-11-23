@@ -277,6 +277,8 @@ FNR == 1 {
         fail(FNR, "B7", "workflow runs on a self-hosted runner, whose public logs show the server\047s name and folders", "runs-on: ubuntu-latest; the AI review runs in ai-review.yml on GitHub")
     if (file == ".github/workflows/automerge.yml" && code ~ /^[[:space:]]*REPO_OWNER:[[:space:]]*\$\{\{[[:space:]]*github\.repository_owner[[:space:]]*\}\}/) owner_env = 1
     if (!running) next
+    if (file == ".github/workflows/automerge.yml" && code ~ /for workflow in / && code !~ /(^|[[:space:]])auto-release\.yml([[:space:];]|$)/)
+        fail(FNR, "B1", "automerge dispatch loop omits the release after a bot merge", "auto-release.yml in both the post-merge and self-heal workflow lists")
     if (file == ".github/workflows/auto-release.yml") {
         if (code ~ /git[[:space:]]+push.*next_tag/ || code ~ /ref=refs\/tags\/\$\{next_tag\}/) tag_line = FNR
         if (code ~ /gh[[:space:]]+workflow[[:space:]]+run[[:space:]]+release\.yml/ && code ~ /--ref[[:space:]]+"?\$\{next_tag\}/) dispatch = 1
@@ -339,10 +341,17 @@ if [[ -f .github/workflows/automerge.yml && -f .github/workflows/verify.yml ]]; 
 fi
 
 if [[ -f .github/workflows/verify.yml ]]; then
-    if ! grep -Eq '^  planted:$' .github/workflows/verify.yml ||
-       ! grep -Eq '^  schedule:$' .github/workflows/verify.yml ||
+    if ! grep -Eq '^  schedule:$' .github/workflows/verify.yml ||
        ! grep -Eq '^    - cron: ' .github/workflows/verify.yml; then
-        printf 'lint-repeats: .github/workflows/verify.yml:1: [B13] Planted journey verification or its nightly trigger is missing. Restore both.\n'
+        printf 'lint-repeats: .github/workflows/verify.yml:1: [B13] The nightly verification trigger is missing. Restore the schedule and its cron.\n'
+        failed=1
+    fi
+    if [[ ! -f .github/workflows/planted.yml ]] ||
+       ! grep -Eq '^  planted:$' .github/workflows/planted.yml ||
+       ! grep -Eq '^  planted-summary:$' .github/workflows/planted.yml ||
+       ! grep -Eq '^  schedule:$' .github/workflows/planted.yml ||
+       ! grep -Eq '^    - cron: ' .github/workflows/planted.yml; then
+        printf 'lint-repeats: .github/workflows/planted.yml:1: [B13] Planted journey verification or its nightly trigger is missing. Restore both in planted.yml.\n'
         failed=1
     fi
 fi
@@ -362,25 +371,26 @@ if ! awk '
 BEGIN {
     for (i = 1; i < ARGC; i++) {
         file = ARGV[i]
-        concurrency = active = safe = 0
+        concurrency = active = cancels = 0
         while ((getline code < file) > 0) {
             if (code ~ /^concurrency:/) concurrency = active = 1
             else if (code ~ /^[^[:space:]]/) active = 0
-            if (active && code ~ /^  cancel-in-progress:[[:space:]]*false[[:space:]]*$/) safe = 1
+            if (active && code ~ /^  cancel-in-progress:[[:space:]]*true[[:space:]]*$/) cancels = 1
         }
         close(file)
-        if (!concurrency) {
-            printf "lint-repeats: %s:1: [B15] Workflow has no top-level concurrency block. Add concurrency with a workflow-specific group and cancel-in-progress: true; release.yml uses false.\n", file
-            failed = 1
-        }
-        if (file == ".github/workflows/release.yml" && !safe) {
-            printf "lint-repeats: %s:1: [B15] Publishing can be cancelled mid-publish. Add cancel-in-progress: false to the top-level concurrency block.\n", file
+        if (!concurrency || !cancels) {
+            printf "lint-repeats: %s:1: [B15] Superseded runs keep running. Add a top-level concurrency group with cancel-in-progress: true.\n", file
             failed = 1
         }
     }
     exit failed ? 1 : 0
 }
 ' .github/workflows/*.yml .github/workflows/*.yaml; then
+    failed=1
+fi
+
+if [[ -f .github/workflows/release.yml ]] && ! grep -Fq 'group: release-${{ github.ref }}' .github/workflows/release.yml; then
+    printf 'lint-repeats: .github/workflows/release.yml:1: [B15] Different releases must never cancel each other. Key the release concurrency group on github.ref.\n'
     failed=1
 fi
 

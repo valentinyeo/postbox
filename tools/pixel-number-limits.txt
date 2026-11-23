@@ -1,6 +1,6 @@
 drawAscii 5
 drawAvatarBitmap 16
-drawCanvas 303
+drawCanvas 302
 drawChat 61
 drawChatTitle 32
 drawCompactQuote 30

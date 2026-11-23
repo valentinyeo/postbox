@@ -1,18 +1,47 @@
 const std = @import("std");
+const read_receipt = @import("read_receipt.zig");
 
 pub const Rect = struct { left: i32, top: i32, right: i32, bottom: i32 };
 
-pub const read_mark_gap: i32 = 3;
-pub const read_mark_text_gap: i32 = 5;
+pub const bubble_bottom_pad: i32 = 10;
+pub const tick_size: i32 = 6;
+pub const tick_gap: i32 = 3;
+pub const tick_stroke: i32 = 2;
+pub const tick_right_inset: i32 = 11;
+pub const tick_bottom_inset: i32 = 3;
+pub const max_ticks: usize = 2;
+pub const tick_points: usize = 3;
+pub const Point = [2]f32;
+pub const Polyline = [tick_points]Point;
+pub const TickStorage = [max_ticks]Polyline;
 
-pub fn readMarkSlot(line_height: i32) i32 {
-    return line_height + read_mark_gap;
+const tick_low: f32 = 0.5;
+const tick_knee: f32 = 0.35;
+
+pub fn fillTicks(storage: *TickStorage, bubble_right: i32, bubble_bottom: i32, count: usize) []const Polyline {
+    const shown = @min(count, max_ticks);
+    for (storage[0..shown], 0..) |*poly, ordinal| {
+        poly.* = tickPolyline(tickRect(bubble_right, bubble_bottom, ordinal));
+    }
+    return storage[0..shown];
 }
 
-pub fn readMarkRect(bubble_right: i32, bubble_bottom: i32, overhang: i32, slot: i32, width: i32) Rect {
-    const top = bubble_bottom + @max(0, overhang) + read_mark_gap;
-    const right = bubble_right;
-    return .{ .left = right - width, .top = top, .right = right, .bottom = top + slot - read_mark_gap };
+pub fn tickRect(bubble_right: i32, bubble_bottom: i32, ordinal: usize) Rect {
+    const right = bubble_right - tick_right_inset - @as(i32, @intCast(ordinal)) * (tick_size + tick_gap);
+    const bottom = bubble_bottom - tick_bottom_inset;
+    return .{ .left = right - tick_size, .top = bottom - tick_size, .right = right, .bottom = bottom };
+}
+
+pub fn tickPolyline(rect: Rect) Polyline {
+    const width: f32 = @floatFromInt(rect.right - rect.left);
+    const height: f32 = @floatFromInt(rect.bottom - rect.top);
+    const left: f32 = @floatFromInt(rect.left);
+    const top: f32 = @floatFromInt(rect.top);
+    return .{
+        .{ left, top + height * tick_low },
+        .{ left + width * tick_knee, top + height },
+        .{ left + width, top },
+    };
 }
 
 pub const Parts = struct {
@@ -27,13 +56,12 @@ pub const Parts = struct {
     tail_pad: i32 = 0,
     min_body: i32 = 0,
     reaction_overhang: i32 = 0,
-    read_mark: i32 = 0,
     skip_body: bool = false,
 };
 
 pub fn total(parts: Parts) i32 {
     const sum = parts.quote + parts.header + parts.forwarded + (if (parts.skip_body) @as(i32, 0) else parts.body) + parts.unfurl + parts.media + parts.voice_status + parts.transcript + parts.tail_pad;
-    return @max(sum, parts.header + parts.min_body) + @max(0, parts.reaction_overhang) + @max(0, parts.read_mark);
+    return @max(sum, parts.header + parts.min_body) + @max(0, parts.reaction_overhang);
 }
 
 test "empty parts have zero height" {
@@ -53,24 +81,6 @@ test "each part contributes to height" {
 test "minimum height includes header when body is empty" {
     try std.testing.expectEqual(@as(i32, 30), total(.{ .header = 10, .min_body = 20, .tail_pad = 5, .skip_body = true }));
     try std.testing.expectEqual(@as(i32, 35), total(.{ .header = 10, .min_body = 20, .body = 20, .tail_pad = 5 }));
-}
-
-test "a read mark reserves room below the bubble" {
-    try std.testing.expectEqual(@as(i32, 26), total(.{ .body = 10, .read_mark = 16 }));
-    try std.testing.expectEqual(@as(i32, 10), total(.{ .body = 10, .read_mark = -4 }));
-    try std.testing.expectEqual(@as(i32, 16), readMarkSlot(13));
-}
-
-test "the read mark sits under the bubble right edge, below any reaction overhang" {
-    const plain = readMarkRect(400, 300, 0, 16, 60);
-    try std.testing.expectEqual(@as(i32, 303), plain.top);
-    try std.testing.expectEqual(@as(i32, 316), plain.bottom);
-    try std.testing.expectEqual(@as(i32, 340), plain.left);
-    try std.testing.expectEqual(@as(i32, 400), plain.right);
-    const with_chip = readMarkRect(400, 300, 22, 16, 60);
-    try std.testing.expectEqual(@as(i32, 325), with_chip.top);
-    try std.testing.expectEqual(@as(i32, 338), with_chip.bottom);
-    try std.testing.expectEqual(@as(i32, 300), plain.top - read_mark_gap);
 }
 
 test "only positive reaction overhang adds height" {
@@ -105,5 +115,63 @@ test "height scales with measured parts across widths and font scales" {
             const expected = @divTrunc(total(base) * scale + 50, 100);
             try std.testing.expect(@abs(total(scaled) - expected) <= 11);
         }
+    }
+}
+
+test "SOFT-3129 one tick sits in the bubble bottom pad and stays inside the bubble" {
+    var storage: TickStorage = undefined;
+    const sent = fillTicks(&storage, 400, 300, read_receipt.ticks(.sent));
+    try std.testing.expectEqual(@as(usize, 1), sent.len);
+    const rect = tickRect(400, 300, 0);
+    try std.testing.expectEqual(@as(i32, 400 - tick_right_inset), rect.right);
+    try std.testing.expectEqual(@as(i32, 300 - tick_bottom_inset), rect.bottom);
+    try std.testing.expectEqual(@as(i32, tick_size), rect.right - rect.left);
+    try std.testing.expect(rect.bottom <= 300);
+    try std.testing.expect(rect.top >= 300 - bubble_bottom_pad);
+    try std.testing.expect(tick_size + tick_bottom_inset <= bubble_bottom_pad);
+}
+
+test "SOFT-3129 two ticks sit side by side under the same time edge" {
+    var storage: TickStorage = undefined;
+    const delivered = fillTicks(&storage, 400, 300, read_receipt.ticks(.delivered));
+    const read = fillTicks(&storage, 400, 300, read_receipt.ticks(.read));
+    try std.testing.expectEqual(@as(usize, 2), delivered.len);
+    try std.testing.expectEqual(@as(usize, 2), read.len);
+    const newest = tickRect(400, 300, 0);
+    const older = tickRect(400, 300, 1);
+    try std.testing.expectEqual(newest.left - tick_gap, older.right);
+    try std.testing.expectEqual(newest.bottom, older.bottom);
+    try std.testing.expect(older.left >= 400 - tick_right_inset - (tick_size * max_ticks + tick_gap * (max_ticks - 1)));
+    try std.testing.expectEqual(@as(usize, 0), fillTicks(&storage, 400, 300, read_receipt.ticks(.none)).len);
+    try std.testing.expectEqual(max_ticks, fillTicks(&storage, 400, 300, 9).len);
+}
+
+test "SOFT-3129 the ticks stay inside the rounded bubble corner" {
+    const design = @import("design_tokens.zig");
+    var storage: TickStorage = undefined;
+    const ticks = fillTicks(&storage, 400, 300, read_receipt.ticks(.delivered));
+    const radius: f32 = @floatFromInt(design.bubble_radius);
+    const reach: f32 = @floatFromInt(tick_stroke / 2);
+    for (ticks) |poly| {
+        for (poly) |point| {
+            const above: f32 = 300 - point[1];
+            const drop = @max(@as(f32, 0), radius - above);
+            const inset = radius - @sqrt(@max(@as(f32, 0), radius * radius - drop * drop));
+            try std.testing.expect(point[0] + reach <= 400 - inset + 1);
+        }
+    }
+}
+
+test "SOFT-3129 each tick draws a check inside its own box" {
+    const rect = tickRect(400, 300, 0);
+    const poly = tickPolyline(rect);
+    try std.testing.expectEqual(@as(f32, @floatFromInt(rect.left)), poly[0][0]);
+    try std.testing.expectEqual(@as(f32, @floatFromInt(rect.right)), poly[2][0]);
+    try std.testing.expectEqual(@as(f32, @floatFromInt(rect.bottom)), poly[1][1]);
+    for (poly) |point| {
+        try std.testing.expect(point[0] >= @as(f32, @floatFromInt(rect.left)));
+        try std.testing.expect(point[0] <= @as(f32, @floatFromInt(rect.right)));
+        try std.testing.expect(point[1] >= @as(f32, @floatFromInt(rect.top)));
+        try std.testing.expect(point[1] <= @as(f32, @floatFromInt(rect.bottom)));
     }
 }

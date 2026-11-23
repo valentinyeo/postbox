@@ -197,6 +197,13 @@ class JudgeTests(unittest.TestCase):
         self.assertEqual(self.run_judge(model, listed=[])[0], 'PASS')
         self.assertEqual(model.models, ['openai/gpt-oss-120b'])
 
+    def test_retired_static_judge_404_moves_to_the_next_preference(self):
+        model = Model(http_error(404), http_error(404), http_error(404), reply('PASS'))
+        result, _, used = self.run_judge(model, fetch_error=MODULE.urllib.error.URLError('down'))
+        self.assertEqual((result, used), ('PASS', 'moonshotai/kimi-k2-instruct'))
+        self.assertEqual(model.models, ['openai/gpt-oss-120b', 'openai/gpt-oss-20b',
+                                       'moonshotai/kimi-k2-instruct-0905', 'moonshotai/kimi-k2-instruct'])
+
     def test_the_run_prints_every_model_tried_and_skipped(self):
         lines = []
         MODULE.judge(self.needs, 'Author model: openai/gpt-6.1-sol', 'pr', ['search'], self.evidence, 'diff', 'k',
@@ -278,7 +285,7 @@ class JudgeTests(unittest.TestCase):
     def test_rate_limit_retries_then_moves_on(self):
         model = Model(http_error(429), http_error(429), http_error(429), '<think>x</think>' + reply('PASS'))
         result, _, used = self.run_judge(model)
-        self.assertEqual((result, used), ('PASS', 'moonshotai/kimi-k2-instruct-0905'))
+        self.assertEqual((result, used), ('PASS', 'openai/gpt-oss-20b'))
         self.assertEqual(model.models.count('openai/gpt-oss-120b'), 3)
 
     def test_digest_reads_text_evidence_and_caps_it(self):
