@@ -1292,6 +1292,36 @@ def chat_delivered_to(jid, own):
 
 
 class ReadTicksHandler(SlackSortHandler):
+    def events(self):
+        self.record(200)
+        self.send_response(200)
+        self.send_header('Content-Type', 'text/event-stream')
+        self.send_header('Cache-Control', 'no-cache')
+        self.send_header('Connection', 'close')
+        self.end_headers()
+        last = int(self.headers.get('Last-Event-ID', '0'))
+        if last == 0:
+            self.event(1, 'reset', '')
+            self.close_connection = True
+            return
+        while True:
+            with self.state.lock:
+                pending = [(index + 2, event) for index, event in enumerate(self.state.ticks_events) if index + 2 > last]
+                if not pending:
+                    self.state.lock.wait(timeout=2)
+            if pending:
+                for event_id, (kind, chat) in pending:
+                    self.event(event_id, kind, chat)
+                self.close_connection = True
+                return
+            self.wfile.write(b': heartbeat\n\n')
+            self.wfile.flush()
+
+    def publish(self, kind, chat):
+        with self.state.lock:
+            self.state.ticks_events.append((kind, chat))
+            self.state.lock.notify_all()
+
     def do_GET(self):
         self.wire_path = self.path
         if not self.authorized():
@@ -1341,10 +1371,7 @@ class ReadTicksHandler(SlackSortHandler):
         elif self.path == '/fixture/ticks/read':
             with self.state.lock:
                 self.state.ticks_read = True
-                events = list(getattr(self.state, 'notification_events', []))
-                events.append('ticks-hold@s.whatsapp.net')
-                self.state.notification_events = events
-                self.state.lock.notify_all()
+            self.publish('msg', 'ticks-hold@s.whatsapp.net')
             self.respond(200, {'read': True}, body=body)
         else:
             self.respond(400, {'error': 'invalid read tick request'}, body=body)
@@ -2787,6 +2814,7 @@ def main():
     server.state.telegram_read = set()
     server.state.gif_attempts = {}
     server.state.ticks_read = False
+    server.state.ticks_events = []
     if args.mode == 'voice':
         server.state.voice_audio = voice_playback_bytes()
     if args.mode == 'media-speed':
