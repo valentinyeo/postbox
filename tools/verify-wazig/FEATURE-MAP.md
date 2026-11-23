@@ -95,7 +95,7 @@ The registry records existing journeys, not proof that a journey ran. GAP means 
 | `update-card` | `src:update-card` | quiet-status | covered |
 | `atomic-update` | `AGENTS:atomic-update` | GAP | GAP: No journey asserts this complete behavior end to end. |
 | `no-toolbar` | `AGENTS:no-toolbar` | quiet-status | covered |
-| `window-title` | `AGENTS:window-title` | GAP | GAP: No journey asserts this complete behavior end to end. |
+| `window-title` | `AGENTS:window-title` | window | covered |
 | `font-and-scale` | `AGENTS:font` | text-comparison | covered |
 | `appearance` | `src:appearance` | appearance | covered |
 | `slack` | `src:slack` | hub | covered |
@@ -110,6 +110,16 @@ The registry records existing journeys, not proof that a journey ran. GAP means 
 | `chat-list-formatting` | `src:chat-lists` | chat-lists | covered |
 | `slack-threads` | `src:slack-threads` | slack-threads | covered |
 | `real-size-inbox` | `tools/verify-wazig/real_size_seed.py` | real-size | covered |
+| `sidebar-panel-surface` | `tools/verify-wazig/check-sidebar-surface.py` | sidebar-surface | covered |
+| `ctrl-shortcut-badges` | `tools/verify-wazig/check-ctrl-badges-evidence.py` | ctrl-badges | covered |
+| `icon-tooltips` | `tools/verify-wazig/check-icon-hints-evidence.py` | icon-hints | covered |
+| `media-layout-fit` | `tools/verify-wazig/check-media-fit-evidence.py` | media-fit | covered |
+| `archived-inbox-list` | `tools/verify-wazig/evidence-archive-inbox.py` | archive-inbox | covered |
+| `archived-chats-in-palette` | `tools/verify-wazig/check-palette-archived-evidence.py` | palette-archived | covered |
+| `slack-archive-label` | `tools/verify-wazig/check-slack-archive-evidence.py` | slack-archive | covered |
+| `thread-broadcast-toggle` | `tools/verify-wazig/check-slack-thread-broadcast-evidence.py` | slack-thread-broadcast | covered |
+| `repaint-budget` | `tools/verify-wazig/evidence-repaint.py` | repaint | covered |
+| `hub-crash-recovery` | `tools/verify-wazig/check-hub-migration-crash-evidence.py` | hub-migration-crash | covered |
 
 ## Journey: real-size
 
