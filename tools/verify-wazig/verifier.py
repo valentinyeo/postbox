@@ -34,8 +34,10 @@ FAMILY_NAMES = {
     'cursor': ('composer', 'cursor'),
 }
 DECLARATION = re.compile(r'^Author model: (\S+)$')
-EVIDENCE_FILES = ('result.txt', 'failure.txt', 'clean-result.txt', 'preexisting.txt', 'classification.json',
-                  'side-effects.json', 'cleanup.txt', 'doctor.json')
+EVIDENCE_FILES = ('preexisting.txt', 'failure.txt', 'journey-check-failed.txt', 'clean-result.txt', 'result.txt',
+                  'classification.json', 'side-effects.json', 'cleanup.txt', 'doctor.json')
+TIMEOUT = 'Timed out:'
+FAILURE_EVIDENCE = ('failure.txt:', 'journey-check-failed.txt:')
 MAX_FILE = 600
 MAX_LOG_TAIL = 800
 MAX_EVIDENCE = 7000
@@ -280,17 +282,41 @@ def ask(judges, system, user, key, post, sleep=time.sleep, say=print):
     return None, None, tried
 
 
-def quoted_failure_is_preexisting(quote, evidence):
-    sections = []
+def sections(evidence):
+    found = []
     current = None
     for line in evidence.splitlines():
         if line.startswith('## '):
             current = []
-            sections.append(current)
+            found.append((line[3:], current))
         elif current is not None:
             current.append(line)
-    holders = [section for section in sections if any(quote in line for line in section)]
-    return bool(holders) and all(any(line.startswith('preexisting.txt:') for line in section) for section in holders)
+    return found
+
+
+def quoted_failure_is_preexisting(quote, evidence):
+    holders = [lines for _, lines in sections(evidence) if any(quote in line for line in lines)]
+    return bool(holders) and all(any(line.startswith('preexisting.txt:') for line in lines) for lines in holders)
+
+
+def evidence_failures(evidence):
+    found = []
+    for folder, lines in sections(evidence):
+        if any(line.startswith('preexisting.txt:') for line in lines):
+            continue
+        found.extend((folder, line) for line in lines
+                     if line.startswith(FAILURE_EVIDENCE)
+                     or (line.startswith('result.txt:') and TIMEOUT in line))
+    return found
+
+
+def journey_gate(needs, evidence):
+    result, notes = verdict(needs)
+    failures = evidence_failures(evidence)[:5]
+    quotes = [line for _, line in failures]
+    if result == 'FAIL' or failures:
+        return 'FAIL', notes + [f'{folder} {line}' for folder, line in failures], quotes
+    return 'PASS', [], quotes
 
 
 def combine(gate, gate_notes, reply, evidence):
@@ -310,9 +336,9 @@ def combine(gate, gate_notes, reply, evidence):
 
 def judge(needs, body, pr_text, journeys, evidence, diff, key, post=http_post, sleep=time.sleep,
           fetch=None, say=print):
-    gate, gate_notes = verdict(needs)
+    gate, gate_notes, _ = journey_gate(needs, evidence)
     if gate == 'FAIL':
-        return 'FAIL', gate_notes + failure_lines(evidence), None
+        return 'FAIL', gate_notes, None
     try:
         families = author_families(body)
     except ValueError as error:
@@ -336,17 +362,6 @@ def judge(needs, body, pr_text, journeys, evidence, diff, key, post=http_post, s
         return 'FAIL', ['No independent judge answered: ' + '; '.join(tried)], None
     result, notes = combine(gate, gate_notes, reply, evidence)
     return result, notes, model
-
-
-def failure_lines(evidence):
-    found = []
-    folder = ''
-    for line in evidence.splitlines():
-        if line.startswith('## '):
-            folder = line[3:]
-        elif line.startswith('failure.txt:'):
-            found.append(f'{folder} {line.strip()}')
-    return found[:5]
 
 
 def render(result, notes, model, sha, run_url):
