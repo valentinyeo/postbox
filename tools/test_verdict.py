@@ -12,8 +12,8 @@ import yaml
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SCRIPT = ROOT / 'tools/verify-wazig/verdict.py'
-SPEC = importlib.util.spec_from_file_location('verdict', SCRIPT)
+SCRIPT = ROOT / 'tools/verify-wazig/verifier.py'
+SPEC = importlib.util.spec_from_file_location('verifier', SCRIPT)
 MODULE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(MODULE)
 
@@ -25,7 +25,8 @@ class VerdictTests(unittest.TestCase):
             'verify': {'result': 'success', 'outputs': {}},
         }
 
-    def test_all_pass(self):
+    def test_missing_base_reproduction_is_fine(self):
+        self.assertNotIn('base-fails', self.needs)
         self.assertEqual(MODULE.verdict(self.needs), ('PASS', []))
 
     def test_failed_or_cancelled_dependency_fails(self):
@@ -86,13 +87,26 @@ class VerdictTests(unittest.TestCase):
         self.assertEqual(checkout['with']['ref'], '${{ github.event.repository.default_branch }}')
         self.assertEqual(job['permissions']['pull-requests'], 'write')
         judge = job['steps'][-1]
-        self.assertIn('if "base-fails" in needs else {"result": "success", "outputs": {"classified": "true"}}', judge['run'])
-        self.assertIn('runpy.run_path("tools/verify-wazig/verdict.py", run_name="__main__")', judge['run'])
+        self.assertEqual(judge['run'], 'python3 tools/verify-wazig/verifier.py')
         self.assertIn('secrets.GROQ_API_KEY', judge['env']['VERDICT_API_KEY'])
         self.assertIn('head.repo.full_name == github.repository', judge['env']['VERDICT_API_KEY'])
         for name, other in workflow['jobs'].items():
             if name != 'verify-verdict':
                 self.assertNotIn('GROQ_API_KEY', json.dumps(other))
+
+    def test_verdict_command_preserves_script_exit_status(self):
+        workflow = yaml.safe_load((ROOT / '.github/workflows/verify.yml').read_text())
+        run = workflow['jobs']['verify-verdict']['steps'][-1]['run']
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            tools = root / 'tools' / 'verify-wazig'
+            tools.mkdir(parents=True)
+            (tools / 'verifier.py').write_text('import os\nraise SystemExit(int(os.environ["PY_EXIT"]))\n')
+            for status in (0, 7):
+                with self.subTest(status=status):
+                    env = dict(os.environ, PY_EXIT=str(status), NEEDS_JSON=json.dumps(self.needs))
+                    result = subprocess.run(['bash', '-e', '-c', run], cwd=root, env=env, text=True, capture_output=True)
+                    self.assertEqual(result.returncode, status, result.stderr)
 
     def test_automerge_requires_successful_verdict(self):
         result = subprocess.run(['bash', str(ROOT / 'tools/test-automerge-admit.sh')],
@@ -148,6 +162,23 @@ class JudgeTests(unittest.TestCase):
         model = Model(reply('PASS'))
         self.run_judge(model, body='Author model: openai/gpt-6.1-sol\nAuthor model: anthropic/claude')
         self.assertEqual(model.models, ['moonshotai/kimi-k2-instruct-0905'])
+
+    def test_missing_base_reproduction_still_gets_an_independent_verdict(self):
+        for needed, verify in (('true', 'success'), ('false', 'skipped')):
+            with self.subTest(needed=needed):
+                self.needs['plan']['outputs']['needed'] = needed
+                self.needs['verify']['result'] = verify
+                model = Model(reply('PASS'))
+                self.assertEqual(self.run_judge(model)[:2], ('PASS', []))
+                self.assertEqual(model.models, ['openai/gpt-oss-120b'])
+                self.assertNotIn('base-fails', self.needs)
+
+    def test_cursor_author_is_a_known_family(self):
+        for declared in ('cursor/composer-2.5', 'composer/composer-2.5'):
+            self.assertEqual(MODULE.family_of(declared), {'cursor'}, declared)
+        model = Model(reply('PASS'))
+        self.assertEqual(self.run_judge(model, body='Author model: cursor/composer-2.5')[:2], ('PASS', []))
+        self.assertEqual(model.models, ['openai/gpt-oss-120b'])
 
     def test_judges_come_from_the_live_model_list(self):
         listed = ['openai/gpt-oss-120b', 'moonshotai/kimi-k2-instruct', 'qwen/qwen3-32b',

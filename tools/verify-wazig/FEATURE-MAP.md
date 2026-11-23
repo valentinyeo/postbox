@@ -111,6 +111,7 @@ The registry records existing journeys, not proof that a journey ran. GAP means 
 | `chat-list-formatting` | `src:chat-lists` | chat-lists | covered |
 | `slack-threads` | `src:slack-threads` | slack-threads | covered |
 | `real-size-inbox` | `tools/verify-wazig/real_size_seed.py` | real-size | covered |
+| `exit_record` | `reportPreviousExit` | exit-record | covered |
 
 ## Journey: real-size
 

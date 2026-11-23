@@ -40,6 +40,13 @@
     "src/signal": [
       "signal"
     ],
+    "src/sync_gate.zig": [
+      "hub-wake-refresh"
+    ],
+    "tools/verify-wazig/fake-wa-bridge.py": [
+      "hub-wake-refresh",
+      "whatsapp-hub"
+    ],
     "src/media": [
       "media-fit"
     ],
@@ -72,6 +79,9 @@
     ],
     "tools/verify-wazig/check-hub-fault-evidence.py": [
       "hub-fault"
+    ],
+    "tools/verify-wazig/check-hub-wake-refresh-evidence.py": [
+      "hub-wake-refresh"
     ],
     "tools/verify-wazig/check-hub-rollback-evidence.py": [
       "hub-rollback"
@@ -340,6 +350,9 @@
     "tools/verify-wazig/journey-voice.ps1": [
       "voice"
     ],
+    "tools/verify-wazig/journey-hub-wake-refresh.ps1": [
+      "hub-wake-refresh"
+    ],
     "tools/verify-wazig/journey-whatsapp-hub.ps1": [
       "whatsapp-hub"
     ],
@@ -389,6 +402,9 @@
     "tools/verify-wazig/prepare-voice.ps1": [
       "voice"
     ],
+    "tools/verify-wazig/prepare-hub-wake-refresh.ps1": [
+      "hub-wake-refresh"
+    ],
     "tools/verify-wazig/prepare-whatsapp-hub.ps1": [
       "whatsapp-hub"
     ],
@@ -434,6 +450,12 @@
     "tools/verify-wazig/dictation-fixture.py": [
       "dictation-shortcuts",
       "dictation-live"
+    ],
+    "src/exit_record": [
+      "exit-record"
+    ],
+    "tools/verify-wazig/journey-exit-record": [
+      "exit-record"
     ]
   }
 }

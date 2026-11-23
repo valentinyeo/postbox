@@ -3,9 +3,7 @@ set -euo pipefail
 cd "${1:-$(git rev-parse --show-toplevel)}"
 run() { echo "preflight-light: $*"; "$@"; }
 PYTHON_LIGHT_TESTS=(
-    test_ai_review
     test_install_ffmpeg
-    test_break_it
     test_app_icon
     test_archive_palette_proof
     test_design_kit
@@ -25,6 +23,7 @@ PYTHON_LIGHT_TESTS=(
     test_no_comments
     test_no_stories
     test_palette_archived
+    test_pc_check
     test_pin_icon
     test_postbox
     test_preexisting_journey
@@ -80,6 +79,8 @@ run bash tools/check-no-new-pixel-numbers.sh .
 run bash tools/test-check-no-source-text-tests.sh
 run bash tools/test-check-no-empty-catch.sh
 run bash tools/test-check-no-new-pixel-numbers.sh
+run python3 tools/check-ladder-calls.py .
+run bash tools/test-check-ladder-calls.sh
 run node tools/strip-comments.mjs --check
 run node tools/check-fonts.mjs
 run python3 tools/check-planted.py

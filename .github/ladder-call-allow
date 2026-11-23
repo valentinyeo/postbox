@@ -1,0 +1,1 @@
+tools/verify-wazig/verifier.py:verifier needs a model family other than the DeepSeek authors; Token Ladder serves only DeepSeek:2026-12-31

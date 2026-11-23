@@ -1,0 +1,12 @@
+diff --git a/src/main.zig b/src/main.zig
+--- a/src/main.zig
++++ b/src/main.zig
+@@ -24449,7 +24449,7 @@
+ fn hubRefreshInboxAndOpenChat(a: *App) void {
+-    if (!hubConfigured(a)) return;
++    if (hubConfigured(a)) return;
+     const backend = hubTransport(a);
+     backend.refreshChats();
+     if (a.selected_chat < a.chat_count and (unifiedHub(a) or a.chats[a.selected_chat].provider == .whatsapp))
+         backend.refreshMessages(a.chats[a.selected_chat].jid.slice());
+ }
