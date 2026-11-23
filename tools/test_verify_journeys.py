@@ -386,6 +386,7 @@ class JourneyRegistryTests(unittest.TestCase):
 class HubWakeRefreshEvidenceTests(unittest.TestCase):
     def setUp(self):
         self.check = runpy.run_path(str(ROOT / 'tools/verify-wazig/check-hub-wake-refresh-evidence.py'))['check_hub_wake_refresh']
+        self.png = runpy.run_path(str(ROOT / 'tools/verify-wazig/check-workspace-icons.py'))
         temp = tempfile.TemporaryDirectory()
         self.addCleanup(temp.cleanup)
         self.folder = Path(temp.name)
@@ -394,10 +395,24 @@ class HubWakeRefreshEvidenceTests(unittest.TestCase):
             'wake-resume.json': {'resume_ms': 37, 'chat_pulls': 4},
             'safety-poll.json': {'poll_ms': 65000, 'chat_pulls': 6},
             'poll.messages.json': {'messages': [{'id': 'POLL-ROW'}]},
+            'sync-line.json': {'caught_up': {'state': 'caught_up', 'line': 'Up to date \u00b7 08:45', 'rect': [2, 2, 22, 12]},
+                               'offline': {'state': 'offline', 'line': 'Offline \u00b7 last sync 08:45', 'rect': [2, 2, 30, 16]},
+                               'retries': [1000, 2000, 4000, 8000], 'connected': 1},
         }.items():
             (self.folder / name).write_text(json.dumps(value))
-        (self.folder / 'hub-proof.log').write_text('hub-wake-refresh wake-resume PASS\nhub-wake-refresh safety-poll PASS\n')
-        (self.folder / 'bridge-requests.jsonl').write_text('\n'.join(json.dumps({'path': path, 'status': 200}) for path in ('/fixture/mute-sse', '/fixture/stale-row')))
+        self.screen('sync-caught-up.png', 40)
+        self.screen('sync-offline.png', 90)
+        (self.folder / 'hub-proof.log').write_text('hub-wake-refresh wake-resume PASS\nhub-wake-refresh safety-poll PASS\n'
+                                                  'hub-wake-refresh retry-backoff PASS\nhub-wake-refresh sync-line PASS\n')
+        rows = [{'path': path, 'status': 200} for path in ('/fixture/mute-sse', '/fixture/stale-row', '/fixture/drop-events', '/fixture/restore-events')]
+        rows.append({'path': '/v1/events', 'status': 503})
+        (self.folder / 'bridge-requests.jsonl').write_text('\n'.join(json.dumps(row) for row in rows))
+
+    def screen(self, name, dark):
+        rows = [[(255, 255, 255)] * 32 for _ in range(20)]
+        for index in range(dark):
+            rows[3 + index // 26][3 + index % 26] = (0, 0, 0)
+        self.png['write_png'](self.folder / name, rows)
 
     def test_resume_and_another_minute_pull_pass(self):
         self.check(self.folder)
@@ -409,6 +424,18 @@ class HubWakeRefreshEvidenceTests(unittest.TestCase):
 
     def test_zero_counted_resume_pulls_are_rejected(self):
         (self.folder / 'wake-resume.json').write_text(json.dumps({'resume_ms': 37, 'chat_pulls': 0}))
+        with self.assertRaises(AssertionError):
+            self.check(self.folder)
+
+    def test_repeated_or_flat_retry_waits_are_rejected(self):
+        evidence = json.loads((self.folder / 'sync-line.json').read_text())
+        evidence['retries'] = [1000, 2000, 2000, 4000]
+        (self.folder / 'sync-line.json').write_text(json.dumps(evidence))
+        with self.assertRaises(AssertionError):
+            self.check(self.folder)
+
+    def test_sync_line_needs_drawn_text(self):
+        self.screen('sync-offline.png', 0)
         with self.assertRaises(AssertionError):
             self.check(self.folder)
 
