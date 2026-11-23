@@ -91,6 +91,7 @@ const transport = @import("transport.zig");
 const messenger_view = @import("messenger_view.zig");
 const outbox = @import("outbox.zig");
 const unified_snapshot = @import("unified_snapshot.zig");
+const exit_record = @import("exit_record.zig");
 
 const max_chats = 256;
 const max_groups = 1024;
@@ -20647,6 +20648,7 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
             saveWindowRect(hwnd);
             saveComposerDraft(a);
             persistDrafts(a);
+            logCloseRequest(a);
             _ = win.DestroyWindow(hwnd);
             return 0;
         },
@@ -20738,6 +20740,7 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
             if (a.brush_sidebar) |brush| _ = win.DeleteObject(brush);
             if (a.brush_raised) |brush| _ = win.DeleteObject(brush);
             if (a.brush_muted) |brush| _ = win.DeleteObject(brush);
+            writeExitRecord(a, .wm_close);
             win.PostQuitMessage(0);
             return 0;
         },
@@ -21387,6 +21390,50 @@ fn appendLaunchLog(a: *App, event: []const u8) void {
     _ = win.WriteFile(handle, line.ptr, @intCast(line.len), &written, null);
 }
 
+const exit_record_name = "last-exit.txt";
+
+fn exitUptimeSeconds() u64 {
+    return (win.GetTickCount64() -% process_start_ms) / 1000;
+}
+
+fn logCloseRequest(a: *App) void {
+    var buffer: [64]u8 = undefined;
+    appendLaunchLog(a, exit_record.closeRequestLine(&buffer, exitUptimeSeconds()) catch return);
+}
+
+fn writeExitRecord(a: *App, reason: exit_record.Reason) void {
+    const record: exit_record.Record = .{
+        .at = nowUnixSeconds(),
+        .version = app_version,
+        .reason = reason,
+        .uptime_seconds = exitUptimeSeconds(),
+        .code = 0,
+    };
+    var record_buffer: [128]u8 = undefined;
+    const text = exit_record.format(&record_buffer, record) catch return;
+    if (messagesDirPath(a, exit_record_name)) |path| {
+        defer a.allocator.free(path);
+        _ = writeCacheFileAtomic(a, path, text);
+    }
+    var line_buffer: [160]u8 = undefined;
+    appendLaunchLog(a, exit_record.exitLine(&line_buffer, record) catch return);
+}
+
+fn reportPreviousExit(a: *App) void {
+    const path = messagesDirPath(a, exit_record_name) orelse return;
+    defer a.allocator.free(path);
+    var line_buffer: [224]u8 = undefined;
+    if (readFileWin(a.allocator, path, 1024)) |stored| {
+        defer a.allocator.free(stored);
+        if (exit_record.parse(stored)) |record| {
+            appendLaunchLog(a, exit_record.startupLine(&line_buffer, record) catch exit_record.startup_missing_line);
+        } else appendLaunchLog(a, exit_record.startup_missing_line);
+    } else appendLaunchLog(a, exit_record.startup_missing_line);
+    const wide = std.unicode.utf8ToUtf16LeAllocZ(a.allocator, path) catch return;
+    defer a.allocator.free(wide);
+    _ = win.DeleteFileW(wide.ptr);
+}
+
 fn loadPlayed(a: *App) void {
     loadHashSet(a, a.played_path, &a.played_set);
     loadVoicePos(a);
@@ -21986,6 +22033,7 @@ pub fn main(init: std.process.Init) !void {
         if (app.view_order.len > 0) init.gpa.free(app.view_order);
     }
     app.startup_probe_pending = !verification_fixture or hubConfigured(app);
+    reportPreviousExit(app);
     if (cache_tag) |tag| {
         app.cache_tag.set(&tag);
         appendLaunchLog(app, "startup: saved account tag loaded");
@@ -23499,6 +23547,7 @@ fn relaunchIntoUpdate(a: *App) void {
     if (launched) {
         _ = win.CloseHandle(process.hProcess);
         _ = win.CloseHandle(process.hThread);
+        writeExitRecord(a, .update);
         _ = win.PostQuitMessage(0);
     } else {
         setStatus(a, "Update installed - restart the app to finish");
