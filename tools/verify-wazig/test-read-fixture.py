@@ -16,7 +16,7 @@ class ReadFixtureShapes(unittest.TestCase):
         handler.do_GET()
         status, rows = responses[0]
         self.assertEqual(200, status)
-        self.assertEqual(['tick-own', 'tick-in', 'tick-read'], [row['MsgID'] for row in rows])
+        self.assertEqual(['tick-own', 'tick-in', 'tick-old'], [row['MsgID'] for row in rows])
         self.assertTrue(rows[0]['FromMe'])
         self.assertEqual(0, rows[0]['ReadBy'])
         self.assertTrue(rows[2]['FromMe'])

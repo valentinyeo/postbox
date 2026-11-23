@@ -1,8 +1,13 @@
 diff --git a/src/main.zig b/src/main.zig
-index 8d6f7e7..8315a68 100644
+index b12b0e5..84ed4c5 100644
 --- a/src/main.zig
 +++ b/src/main.zig
-@@ -22134,7 +22134,7 @@ pub fn main(init: std.process.Init) !void {
+@@ -22146,17 +22146,17 @@ pub fn main(init: std.process.Init) !void {
+ 
+     var main_class = win.WNDCLASSEXW{
+         .cbSize = @sizeOf(win.WNDCLASSEXW),
+         .style = win.CS_HREDRAW | win.CS_VREDRAW,
+         .lpfnWndProc = mainProc,
          .cbClsExtra = 0,
          .cbWndExtra = 0,
          .hInstance = instance,
@@ -11,3 +16,8 @@ index 8d6f7e7..8315a68 100644
          .hCursor = cursor,
          .hbrBackground = null,
          .lpszMenuName = null,
+         .lpszClassName = lit("MessagesZig"),
+         .hIconSm = icon_small,
+     };
+     if (win.RegisterClassExW(&main_class) == 0) return error.RegisterMainClassFailed;
+ 
