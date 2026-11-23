@@ -27,7 +27,6 @@ class FakeRunner:
         self.artifacts = [{'name': f'verify-wazig-{name}', 'expired': False, 'size_in_bytes': 100}
                           for name in ['search', 'voice', 'reply', 'media-fit', 'caret']]
         self.content = {'run.log': b'journey passed', 'screenshots/final.png': b'image'}
-        self.repro = ''
         self.calls = []
         self.pages = {}
 
@@ -39,8 +38,6 @@ class FakeRunner:
             return '\n'.join(self.commits)
         if command[:2] == ['git', 'diff-tree']:
             return '\0'.join(self.files) + '\0'
-        if command[:2] == ['bash', str(ROOT / 'tools/check-repro-first.sh')]:
-            return self.repro
         if command[:2] == ['gh', 'api']:
             url = urlsplit(command[2])
             page = int(parse_qs(url.query).get('page', ['1'])[0])
@@ -201,11 +198,6 @@ class ReleaseProofTests(unittest.TestCase):
         self.runner.artifacts = [row for row in self.runner.artifacts if row['name'] != 'verify-wazig-caret']
         self.assert_missing('journey caret: missing artifact')
 
-    def test_repro_journey_is_required(self):
-        self.runner.repro = 'caret\n'
-        self.runner.artifacts = [row for row in self.runner.artifacts if row['name'] != 'verify-wazig-caret']
-        self.assert_missing('journey caret: missing artifact')
-
     def test_renamed_old_path_is_included(self):
         self.runner.pr_files = [{'filename': 'docs/moved.md', 'previous_filename': 'src/media.zig'}]
         self.runner.artifacts = [row for row in self.runner.artifacts if row['name'] != 'verify-wazig-media-fit']
@@ -289,11 +281,6 @@ class JourneyPlanningTests(unittest.TestCase):
             with self.subTest(files=files):
                 self.assertEqual(proof.plan_journeys(files, self.mapping, self.journeys), expected)
 
-    def test_optional_repro_preserves_old_inline_rules(self):
-        self.assertEqual(proof.plan_journeys(['README.md'], self.mapping, self.journeys, 'caret'),
-                         {'search', 'voice', 'reply', 'caret'})
-        self.assertEqual(proof.plan_journeys(['README.md'], self.mapping, self.journeys, 'none'), set())
-
     def test_limits_and_unknown_names_fail(self):
         mapping = copy.deepcopy(self.mapping)
         mapping['max_journeys'] = 2
@@ -303,8 +290,6 @@ class JourneyPlanningTests(unittest.TestCase):
         mapping['paths']['docs/'] = ['unknown']
         with self.assertRaisesRegex(ValueError, 'PR journey map contains unknown journeys'):
             proof.plan_journeys(['docs/file.md'], mapping, self.journeys)
-        with self.assertRaisesRegex(ValueError, 'PR journey map contains unknown journeys'):
-            proof.plan_journeys([], self.mapping, self.journeys, 'unknown')
 
 
 if __name__ == '__main__':

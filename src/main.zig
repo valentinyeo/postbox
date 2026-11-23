@@ -817,6 +817,7 @@ const App = struct {
     threads_enabled: bool = true,
     replies_mode_key: Utf8Text(383) = .{},
     replies_mode_on: bool = false,
+    replies_mode_saved: bool = false,
     compose: ?win.HWND = null,
     compose_pill: win.RECT = std.mem.zeroes(win.RECT),
     compose_geometry: compose_layout.Layout = .{},
@@ -1739,24 +1740,25 @@ fn repliesModeKey(a: *App) ?[]u8 {
     return std.fmt.allocPrint(a.allocator, "RepliesSlack:{s}:{s}:{s}", .{ @tagName(chat.provider), chat.account.slice(), chat.jid.slice() }) catch null;
 }
 
-fn repliesSlackMode(a: *App) bool {
-    if (a.selected_chat >= a.chat_count) return false;
+fn repliesSlackMode(a: *App) ?bool {
+    if (a.selected_chat >= a.chat_count) return null;
     const chat = &a.chats[a.selected_chat];
     var key_buffer: [383]u8 = undefined;
     const cached_key = std.fmt.bufPrint(&key_buffer, "RepliesSlack:{s}:{s}:{s}", .{ @tagName(chat.provider), chat.account.slice(), chat.jid.slice() }) catch "";
-    if (cached_key.len > 0 and std.mem.eql(u8, cached_key, a.replies_mode_key.slice())) return a.replies_mode_on;
-    const key = repliesModeKey(a) orelse return false;
+    if (cached_key.len > 0 and std.mem.eql(u8, cached_key, a.replies_mode_key.slice())) return if (a.replies_mode_saved) a.replies_mode_on else null;
+    const key = repliesModeKey(a) orelse return null;
     defer a.allocator.free(key);
-    const wide = utf8ToWide(a.allocator, key) catch return false;
+    const wide = utf8ToWide(a.allocator, key) catch return null;
     defer a.allocator.free(wide);
     const value = loadRegistryString(a.allocator, wide.ptr);
     defer if (value) |text| a.allocator.free(text);
-    const on = if (value) |text| std.mem.eql(u8, text, "1") else false;
+    const saved = slack.repliesSetting(value);
     if (cached_key.len > 0) {
         a.replies_mode_key.set(cached_key);
-        a.replies_mode_on = on;
+        a.replies_mode_saved = saved != null;
+        a.replies_mode_on = saved orelse false;
     }
-    return on;
+    return saved;
 }
 
 fn setRepliesSlackMode(a: *App, enabled: bool) void {
@@ -1766,6 +1768,7 @@ fn setRepliesSlackMode(a: *App, enabled: bool) void {
     defer a.allocator.free(wide);
     _ = saveRegistryString(a.allocator, wide.ptr, if (enabled) "1" else "0");
     a.replies_mode_key.set("");
+    a.replies_mode_saved = false;
     a.msg_applied_hash = 0;
     refreshMessages(a);
     setStatus(a, if (enabled) "Replies: Slack style in this chat" else "Replies: WhatsApp style in this chat");
@@ -4113,7 +4116,7 @@ fn buildSlackMessage(a: *App, account: []const u8, item: slack.HistoryItem) Mess
     var raw_buffer: [900]u8 = undefined;
     const raw_text = slack.historyItemBody(item, &raw_buffer);
     const text = raw_text;
-    const is_thread_reply = slack.isThreadReply(item.ts, item.thread_ts) and !slackThreadsEnabled(a);
+    const is_thread_reply = slack.isThreadReply(item.ts, item.thread_ts) and !localSlackStyle(a);
     if (is_thread_reply and text.len > 0 and text.len + 4 <= slack.max_text) {
         var threaded: [slack.max_text + 4]u8 = undefined;
         const rendered = std.fmt.bufPrint(&threaded, "\u{21a9} {s}", .{text}) catch text;
@@ -4122,7 +4125,7 @@ fn buildSlackMessage(a: *App, account: []const u8, item: slack.HistoryItem) Mess
         setSlackMessageText(a, &message, text, lookup);
     }
     formatSlackTime(&message.time, a.allocator, item.ts);
-    if (slackThreadsEnabled(a)) rememberSlackThreadRow(a, &message);
+    if (localSlackStyle(a)) rememberSlackThreadRow(a, &message);
     if (item.file_url.len > 0) {
         message.media_type.set(slackMediaKind(item.file_mime));
         message.mime_type.set(item.file_mime);
@@ -4405,7 +4408,7 @@ fn applySlackReplies(a: *App, raw: []const u8, parent: []const u8) void {
         if (item.file_url.len > 0) requestSlackDownload(a, chat.account.slice(), chat.jid.slice(), item);
     }
     const cursor = slack.nextCursor(root);
-    if (slackThreadsEnabled(a) and cursor.len > 0) requestSlackThread(a, parent, cursor);
+    if (localSlackStyle(a) and cursor.len > 0) requestSlackThread(a, parent, cursor);
     if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.FALSE);
     if (a.user_viewed) requestSlackMark(a, chat.jid.slice());
 }
@@ -9382,7 +9385,7 @@ fn applyMessageData(a: *App, raw: []const u8, fresh_read: bool) bool {
         .outer_fn = if (slack_installation_lookup) |lookup| lookup.lookupFn else null,
     };
     const slack_lookup = slack.UserLookup{ .context = @ptrCast(&slack_names), .lookupFn = hub.SlackUserNames.find };
-    const take = if (chat.provider == .slack and slackThreadsEnabled(a)) rows.len else @min(rows.len, max_messages);
+    const take = if (chat.provider == .slack and localSlackStyle(a)) rows.len else @min(rows.len, max_messages);
     var source_index = take;
     while (source_index > 0) {
         source_index -= 1;
@@ -9416,7 +9419,7 @@ fn applyMessageData(a: *App, raw: []const u8, fresh_read: bool) bool {
             message.thread_ts.set(getString(object, "thread_ts"));
             message.reply_count = @intCast(@max(0, getInt(object, "reply_count")));
             message.latest_reply.set(getString(object, "latest_reply"));
-            if (slackThreadsEnabled(a) and slack.isThreadReply(id, message.thread_ts.slice())) {
+            if (localSlackStyle(a) and slack.isThreadReply(id, message.thread_ts.slice())) {
                 if (splitQuote(text, getString(object, "Text"))) |parts| text = parts.body;
             }
         }
@@ -9425,7 +9428,7 @@ fn applyMessageData(a: *App, raw: []const u8, fresh_read: bool) bool {
         message.revoked = revoked;
         if (message.revoked) {
             text = "Message deleted";
-        } else if (!(chat.provider == .slack and slackThreadsEnabled(a) and slack.isThreadReply(id, message.thread_ts.slice())) and getString(object, "quoted_msg_id").len > 0) {
+        } else if (!(chat.provider == .slack and localSlackStyle(a) and slack.isThreadReply(id, message.thread_ts.slice())) and getString(object, "quoted_msg_id").len > 0) {
             if (splitQuote(text, getString(object, "Text"))) |parts| {
                 const quoted_sender_jid = getString(object, "quoted_sender_jid");
                 var quote_buffer: [slack.max_text + 1]u8 = undefined;
@@ -9473,7 +9476,7 @@ fn applyMessageData(a: *App, raw: []const u8, fresh_read: bool) bool {
             var reaction_buffer: [4096]u8 = undefined;
             message.reaction.set(a.allocator, slack_emoji.replace(&reaction_buffer, getString(object, "ReactionEmoji"), .{ .context = a, .resolve = resolveCustomEmoji }));
         }
-        if (chat.provider == .slack and slackThreadsEnabled(a)) rememberSlackThreadRow(a, &message);
+        if (chat.provider == .slack and localSlackStyle(a)) rememberSlackThreadRow(a, &message);
         if (source_index >= max_messages) continue;
         a.messages[a.message_count] = message;
         invalidateCanvasIconTooltips(a);
@@ -11242,6 +11245,46 @@ fn paintReplyBar(a: *App, shapes: *const smooth.Context, hdc: win.HDC) void {
     drawFluentIcon(a, hdc, close, 0xE711, theme.current.on_surface_variant);
 }
 
+fn updateMentionPopup(a: *App) bool {
+    const compose = a.compose orelse return false;
+    var wide: [drafts.max_text + 1]u16 = undefined;
+    const length: usize = @intCast(win.GetWindowTextW(compose, &wide, wide.len));
+    var sel_start: u32 = 0;
+    var sel_end: u32 = 0;
+    _ = win.SendMessageW(compose, win.EM_GETSEL, @intFromPtr(&sel_start), @bitCast(@intFromPtr(&sel_end)));
+    if (sel_start != sel_end or length == 0) return false;
+    const text = std.unicode.utf16LeToUtf8Alloc(a.allocator, wide[0..length]) catch return false;
+    defer a.allocator.free(text);
+    const token = mention_index.activeToken(text, sel_start) orelse return false;
+    var names: [32][128]u8 = undefined;
+    var people: [32]mention_index.Person = undefined;
+    const roster = mentionPeople(a, &names, &people);
+    var matches: [8]?mention_index.Match = @splat(null);
+    a.mention_roster = roster;
+    a.mention_query.set(token.query);
+    const found = mention_index.search(people[0..roster], token.query, selectedChatIsSlack(a), &matches);
+    if (found == 0) {
+        shortcodeHide(a);
+        return true;
+    }
+    a.sc_mention = true;
+    a.sc_sel = 0;
+    a.sc_count = @min(found, a.mention_rows.len);
+    for (matches[0..a.sc_count], 0..) |match, position| a.mention_rows[position] = people[match.?.index];
+    showMentionPopup(a, sel_start);
+    var status_buffer: [320]u8 = undefined;
+    var stream = std.Io.Writer.fixed(&status_buffer);
+    stream.writeAll("Mention: ") catch {};
+    const shown = @min(found, 3);
+    for (matches[0..shown], 0..) |match, position| {
+        if (position > 0) stream.writeAll(", ") catch {};
+        stream.writeAll(people[match.?.index].name) catch {};
+    }
+    if (found > shown) stream.print(" +{d}", .{found - shown}) catch {};
+    setStatus(a, stream.buffered());
+    return true;
+}
+
 fn acceptMention(a: *App) bool {
     const compose = a.compose orelse return false;
     var wide: [drafts.max_text + 1]u16 = undefined;
@@ -11348,6 +11391,24 @@ fn mentionPeople(a: *App, names: [][128]u8, out: []mention_index.Person) usize {
 fn replyLineHeight(hdc: win.HDC, a: *App, message: *const Message) i32 {
     if (message.quoted_msg_id.len == 0) return 0;
     return textLineHeight(hdc, a.font_small.?) * 2 + px(a, 6);
+}
+
+fn drawReadMark(hdc: win.HDC, a: *App, bubble: win.RECT, reaction_overhang: i32, slot: i32) void {
+    const font = a.font_small orelse return;
+    _ = win.SelectObject(hdc, @ptrCast(font));
+    const ticks = lit("\u{2713}\u{2713}");
+    const label = lit("Read");
+    const ticks_text = std.mem.span(ticks);
+    const label_text = std.mem.span(label);
+    const ticks_width = runWidth(hdc, ticks_text);
+    const label_width = runWidth(hdc, label_text);
+    const rect = message_layout.readMarkRect(bubble.right, bubble.bottom, reaction_overhang, slot, ticks_width + message_layout.read_mark_text_gap + label_width);
+    var ticks_rect = win.RECT{ .left = rect.left, .top = rect.top, .right = rect.left + ticks_width, .bottom = rect.bottom };
+    _ = win.SetTextColor(hdc, read_mark_ink);
+    _ = text_draw.drawText(hdc, ticks, @intCast(ticks_text.len), &ticks_rect, win.DT_LEFT | win.DT_SINGLELINE | win.DT_VCENTER | win.DT_NOPREFIX);
+    var label_rect = win.RECT{ .left = ticks_rect.right + message_layout.read_mark_text_gap, .top = rect.top, .right = rect.right, .bottom = rect.bottom };
+    _ = win.SetTextColor(hdc, theme.current.on_surface_variant);
+    _ = text_draw.drawText(hdc, label, @intCast(label_text.len), &label_rect, win.DT_LEFT | win.DT_SINGLELINE | win.DT_VCENTER | win.DT_NOPREFIX);
 }
 
 fn jumpToReply(a: *App, id: []const u8) bool {
@@ -12045,9 +12106,11 @@ fn scrollToSelectedMessage(a: *App) void {
     _ = win.GetClientRect(canvas, &client);
     const bubble_width = messageBubbleWidth(a, client.right - client.left);
     ensureBitmap(a, &a.messages[selected]);
+    const read_mark_index = readMarkIndex(a);
+    const read_mark_height = readMarkHeight(hdc, a, read_mark_index);
     var total_height: i32 = px(a, 18);
     for (a.messages[0..a.message_count], 0..) |*message, index| {
-        if (channelMessageVisible(a, message)) total_height += measureMessage(hdc, a, message, bubble_width, startsSenderGroup(a, index)) + threadSummaryHeight(a, message) + replyLineHeight(hdc, a, message) + messageGap(a, index);
+        if (channelMessageVisible(a, message)) total_height += measureMessage(hdc, a, message, bubble_width, startsSenderGroup(a, index), messageReadMark(read_mark_index, read_mark_height, index)) + threadSummaryHeight(a, message) + replyLineHeight(hdc, a, message) + messageGap(a, index);
     }
     a.max_scroll = @max(0, total_height - (client.bottom - client.top));
     var y = client.bottom - px(a, 14) + a.scroll_y;
@@ -12055,7 +12118,7 @@ fn scrollToSelectedMessage(a: *App) void {
     while (index > 0) {
         index -= 1;
         if (!channelMessageVisible(a, &a.messages[index])) continue;
-        const height = measureMessage(hdc, a, &a.messages[index], bubble_width, startsSenderGroup(a, index)) + threadSummaryHeight(a, &a.messages[index]) + replyLineHeight(hdc, a, &a.messages[index]);
+        const height = measureMessage(hdc, a, &a.messages[index], bubble_width, startsSenderGroup(a, index), messageReadMark(read_mark_index, read_mark_height, index)) + threadSummaryHeight(a, &a.messages[index]) + replyLineHeight(hdc, a, &a.messages[index]);
         y -= height + messageGap(a, index);
         if (index != selected) continue;
         const delta = message_scroll.scrollDelta(y, height, client.top, client.bottom, px(a, 8));
@@ -12777,6 +12840,7 @@ fn shortcodeUpdate(a: *App) void {
         if (shortcodes.resolve(t.query())) |emoji| return shortcodeReplace(a, t, emoji);
         return shortcodeHide(a);
     }
+    a.sc_mention = false;
     a.sc_count = shortcodes.matches(t.query(), &a.sc_matches);
     a.sc_sel = 0;
     if (a.sc_count == 0) return shortcodeHide(a);
@@ -15594,7 +15658,7 @@ fn buildPaletteItems(a: *App) void {
         appendPalette(a, "Cancel selection", "Esc", command_cancel_selection);
     }
     appendPalette(a, "Pick the mention", "", command_pick_mention);
-    const slack_replies = repliesSlackMode(a);
+    const slack_replies = localSlackStyle(a);
     appendPalette(a, if (slack_replies) "Replies: Slack style" else "Replies: WhatsApp style", "", if (slack_replies) command_replies_slack else command_replies_whatsapp);
     appendPalette(a, if (slack_replies) "Replies: WhatsApp style" else "Replies: Slack style", "", if (slack_replies) command_replies_whatsapp else command_replies_slack);
     appendPalette(a, if (a.show_archived) "Show inbox chats" else "Show archived chats", "", command_archived);
@@ -18052,6 +18116,26 @@ fn ownReadable(a: *App, index: usize) bool {
     return message.from_me and message.send_state == .none and !message.revoked and channelMessageVisible(a, message);
 }
 
+fn readMarkIndex(a: *App) ?usize {
+    const newest = read_receipt.newestOwn(a.message_count, a, ownReadable) orelse return null;
+    const message = &a.messages[newest];
+    return if (read_receipt.shows(receiptCapability(a), message.from_me, message.send_state == .none, message.revoked, message.read_by)) newest else null;
+}
+
+fn readMarkHeight(hdc: win.HDC, a: *App, marked: ?usize) i32 {
+    if (marked == null) return 0;
+    return message_layout.readMarkSlot(textLineHeight(hdc, a.font_small.?));
+}
+
+fn messageReadMark(marked: ?usize, height: i32, index: usize) i32 {
+    const marked_index = marked orelse return 0;
+    return if (marked_index == index) height else 0;
+}
+
+fn reactionOverhang(a: *const App, chip: win.SIZE) i32 {
+    return @max(0, chip.cy - px(a, 4));
+}
+
 fn receiptCapability(a: *const App) read_receipt.Capability {
     if (a.selected_chat >= a.chat_count) return .signal;
     return switch (a.chats[a.selected_chat].provider) {
@@ -18183,7 +18267,7 @@ fn quoteBlockHeight(hdc: win.HDC, a: *App, message: *const Message, width: i32) 
     return quote_layout.blockHeight(px(a, quote_vertical_pad), name_height, quoteBodyHeight(hdc, a, message.quote.slice(), quoteTextWidth(a, width)), px(a, quote_after_gap));
 }
 
-fn measureTag(a: *const App, message: *const Message, width: i32, show_sender: bool) u64 {
+fn measureTag(a: *const App, message: *const Message, width: i32, show_sender: bool, read_mark: i32) u64 {
     var h = std.hash.Wyhash.init(0);
     const parts = [_]u64{
         @intCast(width),
@@ -18204,20 +18288,21 @@ fn measureTag(a: *const App, message: *const Message, width: i32, show_sender: b
         message.reaction.len,
         @intFromEnum(message.unfurl_provider),
         @intCast(threadSummaryHeight(@constCast(a), message)),
+        @intCast(read_mark),
     };
     h.update(std.mem.sliceAsBytes(&parts));
     return h.final() | 1;
 }
 
-fn measureMessageCached(hdc: win.HDC, a: *App, message: *Message, width: i32, show_sender: bool) i32 {
+fn measureMessageCached(hdc: win.HDC, a: *App, message: *Message, width: i32, show_sender: bool, read_mark: i32) i32 {
     _ = unfurlCardVisible(a, message);
-    if (message.measure_tag == measureTag(a, message, width, show_sender)) return message.measure_height;
-    return measureMessageStore(hdc, a, message, width, show_sender);
+    if (message.measure_tag == measureTag(a, message, width, show_sender, read_mark)) return message.measure_height;
+    return measureMessageStore(hdc, a, message, width, show_sender, read_mark);
 }
 
-fn measureMessageStore(hdc: win.HDC, a: *App, message: *Message, width: i32, show_sender: bool) i32 {
-    const height = measureMessage(hdc, a, message, width, show_sender) + threadSummaryHeight(a, message) + replyLineHeight(hdc, a, message);
-    message.measure_tag = measureTag(a, message, width, show_sender);
+fn measureMessageStore(hdc: win.HDC, a: *App, message: *Message, width: i32, show_sender: bool, read_mark: i32) i32 {
+    const height = measureMessage(hdc, a, message, width, show_sender, read_mark) + threadSummaryHeight(a, message) + replyLineHeight(hdc, a, message);
+    message.measure_tag = measureTag(a, message, width, show_sender, read_mark);
     message.measure_height = height;
     return height;
 }
@@ -18239,7 +18324,7 @@ fn voiceFooterLineHeight(hdc: win.HDC, a: *App) i32 {
     return @max(a.font_small_height, rect.bottom - rect.top);
 }
 
-fn measureMessage(hdc: win.HDC, a: *App, message: *const Message, limit: i32, show_sender: bool) i32 {
+fn measureMessage(hdc: win.HDC, a: *App, message: *const Message, limit: i32, show_sender: bool, read_mark: i32) i32 {
     const width = messageWidth(hdc, a, message, limit);
     _ = win.SelectObject(hdc, @ptrCast(a.font.?));
     const header_height = messageHeaderHeight(hdc, a, show_sender);
@@ -18267,11 +18352,13 @@ fn measureMessage(hdc: win.HDC, a: *App, message: *const Message, limit: i32, sh
     parts.tail_pad = px(a, 10);
     parts.min_body = px(a, 20);
     parts.reaction_overhang = reactionChipSize(hdc, a, message, width).cy - px(a, 4);
+    parts.read_mark = read_mark;
     return message_layout.total(parts);
 }
 
 const SenderColor = design.SenderColor;
 const sender_palette = design.sender_palette;
+const read_mark_ink: u32 = design.provider_colors.telegram;
 
 fn senderColorFor(seed: []const u8) SenderColor {
     if (seed.len == 0) return sender_palette[0];
@@ -18819,16 +18906,16 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
             }
         }
     }
+    const read_mark_index = readMarkIndex(a);
+    const read_mark_height = readMarkHeight(hdc, a, read_mark_index);
     var total_height: i32 = px(a, 90);
     for (a.messages[0..a.message_count], 0..) |*message, index| {
-        if (channelMessageVisible(a, message)) total_height += measureMessageCached(hdc, a, message, bubble_width, startsSenderGroup(a, index)) + messageGap(a, index);
+        if (channelMessageVisible(a, message)) total_height += measureMessageCached(hdc, a, message, bubble_width, startsSenderGroup(a, index), messageReadMark(read_mark_index, read_mark_height, index)) + messageGap(a, index);
     }
     a.max_scroll = @max(0, total_height - (client.bottom - client.top));
     a.scroll_y = std.math.clamp(a.scroll_y, 0, a.max_scroll);
     a.quote_link_scroll = a.scroll_y;
     var cursor_y = client.bottom - px(a, 14) + a.scroll_y;
-    const receipt_message = read_receipt.newestOwn(a.message_count, a, ownReadable);
-    const receipt_capability = receiptCapability(a);
     var index = a.message_count;
     while (index > 0) {
         index -= 1;
@@ -18847,12 +18934,12 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
         message.word_count = 0;
         if (!channelMessageVisible(a, message)) continue;
         const show_sender = startsSenderGroup(a, index);
-        const estimated_height = measureMessageCached(hdc, a, message, bubble_width, show_sender);
+        const estimated_height = measureMessageCached(hdc, a, message, bubble_width, show_sender, messageReadMark(read_mark_index, read_mark_height, index));
         var y = cursor_y - estimated_height;
         cursor_y = y - messageGap(a, index);
         if (y > client.bottom or y + estimated_height < client.top) continue;
         ensureBitmap(a, message);
-        var height = measureMessageStore(hdc, a, message, bubble_width, show_sender);
+        var height = measureMessageStore(hdc, a, message, bubble_width, show_sender, messageReadMark(read_mark_index, read_mark_height, index));
         y -= height - estimated_height;
         cursor_y -= height - estimated_height;
         if (y > client.bottom or y + height < client.top) continue;
@@ -18885,6 +18972,8 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
             drawCompactQuote(hdc, &shapes, a, index, line.slice(), quote_start, message.quote_hit, client, message.from_me);
             y += reply_height;
         }
+        const read_mark_slot = messageReadMark(read_mark_index, read_mark_height, index);
+        height -= read_mark_slot;
         const sender_height = if (show_sender) senderBandHeight(hdc, a) + px(a, 8) else @as(i32, 0);
         const bubble_top = y + sender_height;
         const bubble_height = height - sender_height - @max(0, reaction_size.cy - px(a, 4));
@@ -19190,12 +19279,7 @@ fn drawCanvas(hwnd: win.HWND, a: *App) void {
                 }
             }
         }
-        if (receipt_message == index and read_receipt.shows(receipt_capability, message.from_me, message.send_state == .none, message.revoked, message.read_by)) {
-            _ = win.SelectObject(hdc, @ptrCast(a.font_small.?));
-            _ = win.SetTextColor(hdc, design.ReaderHint);
-            var tick_rect = win.RECT{ .left = right - px(a, 20), .top = message.bubble_hit.bottom - px(a, 22), .right = right - px(a, 4), .bottom = message.bubble_hit.bottom - px(a, 4) };
-            _ = text_draw.drawText(hdc, lit("\u{2713}\u{2713}"), 2, &tick_rect, win.DT_RIGHT | win.DT_BOTTOM | win.DT_SINGLELINE | win.DT_NOPREFIX);
-        }
+        if (read_mark_slot != 0) drawReadMark(hdc, a, message.bubble_hit, reactionOverhang(a, reaction_size), read_mark_slot);
         if (message.reaction.len > 0) {
             _ = win.SelectObject(hdc, @ptrCast(a.font.?));
             var my_reaction: [63]u16 = undefined;
@@ -20422,46 +20506,10 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                 }
                 if (a.compose) |compose| {
                     if (win.GetWindowTextLengthW(compose) == 0) a.compose_dragged = 0;
-                    var wide: [drafts.max_text + 1]u16 = undefined;
-                    const length: usize = @intCast(win.GetWindowTextW(compose, &wide, wide.len));
-                    var sel_start: u32 = 0;
-                    var sel_end: u32 = 0;
-                    _ = win.SendMessageW(compose, win.EM_GETSEL, @intFromPtr(&sel_start), @bitCast(@intFromPtr(&sel_end)));
-                    if (sel_start == sel_end and length > 0) {
-                        if (std.unicode.utf16LeToUtf8Alloc(a.allocator, wide[0..length])) |text| {
-                            defer a.allocator.free(text);
-                            if (mention_index.activeToken(text, sel_start)) |token| {
-                                var names: [32][128]u8 = undefined;
-                                var people: [32]mention_index.Person = undefined;
-                                const roster = mentionPeople(a, &names, &people);
-                                var matches: [8]?mention_index.Match = @splat(null);
-                                a.mention_roster = roster;
-                                a.mention_query.set(token.query);
-                                const found = mention_index.search(people[0..roster], token.query, selectedChatIsSlack(a), &matches);
-                                if (found > 0) {
-                                    a.sc_mention = true;
-                                    a.sc_sel = 0;
-                                    a.sc_count = @min(found, a.mention_rows.len);
-                                    for (matches[0..a.sc_count], 0..) |match, position| a.mention_rows[position] = people[match.?.index];
-                                    showMentionPopup(a, sel_start);
-                                    var status_buffer: [320]u8 = undefined;
-                                    var stream = std.Io.Writer.fixed(&status_buffer);
-                                    stream.writeAll("Mention: ") catch {};
-                                    const shown = @min(found, 3);
-                                    for (matches[0..shown], 0..) |match, position| {
-                                        if (position > 0) stream.writeAll(", ") catch {};
-                                        stream.writeAll(people[match.?.index].name) catch {};
-                                    }
-                                    if (found > shown) stream.print(" +{d}", .{found - shown}) catch {};
-                                    setStatus(a, stream.buffered());
-                                }
-                            }
-                        } else |_| {}
-                    }
                 }
                 saveComposerDraft(a);
                 layoutComposer(a);
-                shortcodeUpdate(a);
+                if (!updateMentionPopup(a)) shortcodeUpdate(a);
             }
             return 0;
         },
@@ -21031,7 +21079,7 @@ fn handleKeyboard(a: *App, message: *const win.MSG) bool {
         }
     }
     if (a.thread_compose != null and focus == a.thread_compose.?) return false;
-    if (!control and !alt and !shift and key == win.VK_RETURN and a.thread_parent.len == 0 and slackThreadsEnabled(a)) {
+    if (!control and !alt and !shift and key == win.VK_RETURN and a.thread_parent.len == 0 and slackThreadsAccount(a).len > 0 and localSlackStyle(a)) {
         if (a.selected_message) |selected| {
             const empty = if (a.compose) |compose| win.GetWindowTextLengthW(compose) == 0 else true;
             if (empty and selected < a.message_count) {
@@ -24774,7 +24822,9 @@ fn toggleSlackThreads(a: *App) void {
 
 fn localSlackStyle(a: *App) bool {
     if (a.selected_chat >= a.chat_count) return false;
-    return if (a.chats[a.selected_chat].provider == .slack) slackThreadsEnabled(a) else repliesSlackMode(a);
+    const is_slack = a.chats[a.selected_chat].provider == .slack;
+    const workspace_threads = is_slack and slackThreadsEnabled(a);
+    return slack.repliesFold(repliesSlackMode(a), workspace_threads);
 }
 
 fn hasDirectReplies(a: *const App, parent: *const Message) bool {
@@ -24808,7 +24858,7 @@ fn localReplyHidden(a: *App, message: *const Message) bool {
 }
 
 fn channelMessageVisible(a: *App, message: *const Message) bool {
-    return (message.from_me and message.send_state != .none) or (!localReplyHidden(a, message) and (!slackThreadsEnabled(a) or !slack.isThreadReply(message.id.slice(), message.thread_ts.slice())));
+    return (message.from_me and message.send_state != .none) or (!localReplyHidden(a, message) and (!localSlackStyle(a) or !slack.isThreadReply(message.id.slice(), message.thread_ts.slice())));
 }
 
 fn threadReplyCount(a: *const App, parent: *const Message) usize {
@@ -24844,7 +24894,7 @@ fn threadLatestReply(a: *const App, parent: *const Message) []const u8 {
 }
 
 fn threadSummaryHeight(a: *App, message: *const Message) i32 {
-    return if ((slackThreadsEnabled(a) or localSlackStyle(a)) and !slack.isThreadReply(message.id.slice(), message.thread_ts.slice()) and threadReplyCount(a, message) > 0) @max(px(a, 30), @as(i32, @intCast(@abs(scaledFontHeight(theme.type_preview, a.font_scale, @intCast(a.dpi))))) + px(a, 10)) else 0;
+    return if (localSlackStyle(a) and !slack.isThreadReply(message.id.slice(), message.thread_ts.slice()) and threadReplyCount(a, message) > 0) @max(px(a, 30), @as(i32, @intCast(@abs(scaledFontHeight(theme.type_preview, a.font_scale, @intCast(a.dpi))))) + px(a, 10)) else 0;
 }
 
 fn threadPanelWidth(a: *const App, width: i32, left_width: i32) i32 {
@@ -24956,7 +25006,7 @@ fn closeSlackThread(a: *App) void {
 }
 
 fn openSlackThread(a: *App, selected: usize) void {
-    if ((!slackThreadsEnabled(a) and !repliesSlackMode(a)) or selected >= a.message_count or a.hwnd == null) return;
+    if (!localSlackStyle(a) or selected >= a.message_count or a.hwnd == null) return;
     const message = &a.messages[selected];
     var parent = Utf8Text(191){};
     parent.set(if (slack.isThreadReply(message.id.slice(), message.thread_ts.slice())) message.thread_ts.slice() else if (localSlackStyle(a)) localThreadRoot(a, message) orelse message.id.slice() else message.id.slice());
@@ -25169,9 +25219,8 @@ fn controlReadTick(a: *App, w: *std.Io.Writer) !void {
 }
 
 fn controlSlackThreads(a: *App, w: *std.Io.Writer) !void {
-    const local = localSlackStyle(a);
-    if (slackThreadsAccount(a).len == 0 and !local) return;
-    const enabled = slackThreadsEnabled(a) or local;
+    const enabled = localSlackStyle(a);
+    if (slackThreadsAccount(a).len == 0 and !enabled) return;
     var parent: ?*const Message = null;
     var inline_replies: usize = 0;
     var loose_replies: usize = 0;
@@ -25186,7 +25235,7 @@ fn controlSlackThreads(a: *App, w: *std.Io.Writer) !void {
     try control_api.writeString(w, if (parent) |message| message.id.slice() else "");
     try w.writeAll(",\"parent_reply_line\":");
     try control_api.writeString(w, if (enabled and parent != null) slack.repliesLine(&line_buffer, threadReplyCount(a, parent.?)) else "");
-    try w.print(",\"inline_replies\":{d},\"loose_replies\":{d},\"replies\":{d},\"open\":{},\"threads_option\":\"{s}\"", .{ inline_replies, loose_replies, a.thread_panel_replies, a.thread_list != null, slack.threadsSettingValue(enabled) });
+    try w.print(",\"inline_replies\":{d},\"loose_replies\":{d},\"replies\":{d},\"open\":{},\"threads_option\":\"{s}\",\"replies_style\":\"{s}\"", .{ inline_replies, loose_replies, a.thread_panel_replies, a.thread_list != null, slack.threadsSettingValue(enabled), if (enabled) "slack" else "whatsapp" });
     var label = WideText(191){};
     threadBroadcastLabel(a, &label);
     const label_utf8 = std.unicode.utf16LeToUtf8Alloc(a.allocator, label.slice()) catch return error.OutOfMemory;

@@ -31,7 +31,7 @@ class InstallFfmpegTests(unittest.TestCase):
             if CALL in workflow.read_text(encoding="utf-8")
         ]
         self.assertEqual(users, ["ci.yml", "planted.yml", "verify.yml"])
-        self.assertEqual((ROOT / ".github/workflows/verify.yml").read_text(encoding="utf-8").count(CALL), 2)
+        self.assertEqual((ROOT / ".github/workflows/verify.yml").read_text(encoding="utf-8").count(CALL), 1)
         self.assertEqual((ROOT / ".github/workflows/planted.yml").read_text(encoding="utf-8").count(CALL), 1)
 
 

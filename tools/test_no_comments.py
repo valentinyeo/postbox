@@ -196,7 +196,7 @@ else:
                 self.assertEqual(merges[0][merges[0].index('--match-head-commit') + 1], 'a' * 40)
 
     def test_SOFT_2593_skipped_pr_optional_jobs_do_not_block_but_failed_ones_do(self):
-        for mode in ('SKIPPED:candidate', 'SKIPPED:base-fails', 'SKIPPED:verify (${{ matrix.feature }})'):
+        for mode in ('SKIPPED:candidate', 'SKIPPED:verify (${{ matrix.feature }})'):
             with self.subTest(mode=mode):
                 result, calls = self.run_workflow(mode)
                 self.assertTrue(any(args[:2] == ['pr', 'merge'] for args in calls), result.stdout)

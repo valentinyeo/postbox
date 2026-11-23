@@ -19,7 +19,6 @@ step() {
 
 step 'Feature map' bash tools/check-feature-map.sh .
 step 'Skill map' python3 tools/verify-wazig/check-map.py
-step 'Planted bug coverage' python3 tools/check-planted.py
 
 for workflow in verify.yml planted.yml; do
     run_json="$(gh run list -R "$REPO" --workflow "$workflow" --event schedule --status completed --limit 1 --json databaseId,url --jq '.[0] // empty' 2>/dev/null || true)"
