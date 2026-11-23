@@ -9,7 +9,7 @@ Type a message draft, leave the chat and return to the same unsent text without 
 - `draft-switch`: restore each chat's own draft when switching conversations.
 - `draft-persist`: unsent drafts are saved to local storage.
 - `draft-newline`: Shift+Enter inserts a newline; Enter normally sends.
-- `composer-one-box`: one visible rounded composer contains Attach, text, mic, Dictate, emoji and Send; icons stay bottom-anchored as text grows at wide and narrow widths in AMOLED and Green.
+- `composer-one-box`: one visible rounded composer contains Attach, text, mic, Dictate, emoji and Send; icons stay bottom-anchored as text grows at wide and narrow widths in Graphite, the only theme.
 
 ## How to get to it (user POV)
 
@@ -38,4 +38,4 @@ Preconditions: doctor passes; Alpha selected, both chats have empty drafts, comp
 - Draft persistence runs on the one-second refresh timer and on chat changes/close; wait for the file.
 - Attach reuses Ctrl+K → `Attach photo or file`: the existing picker stages Slack/Telegram files, with the button disabled and its tooltip explaining unsupported providers or Slack bridges. This journey does not open the picker, record audio or send.
 - User drafts are private. Use only the provided synthetic text and disposable GUID profile, never copy real stores into evidence.
-- Source: `saveComposerDraft` (`src/main.zig:11435`) saves composer drafts, `switchComposerDraft` (`src/main.zig:11488`) restores the selected identity, and the Composer group at `src/shortcuts.zig:83-92` lists composer keys. The editing/layout assertions are in `tools/verify-wazig/journey-drafts.ps1`; the per-chat restore check is at lines 157-165.
+- Source: `saveComposerDraft` (`src/main.zig:11496`) saves composer drafts, `switchComposerDraft` (`src/main.zig:11549`) restores the selected identity, and the Composer group at `src/shortcuts.zig:83-92` lists composer keys. The editing/layout assertions are in `tools/verify-wazig/journey-drafts.ps1`; the per-chat restore check is at lines 157-165.

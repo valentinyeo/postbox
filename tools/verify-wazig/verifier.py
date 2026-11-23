@@ -31,6 +31,7 @@ FAMILY_NAMES = {
     'xai': ('grok', 'xai'),
     'minimax': ('minimax',),
     'mistral': ('mistral', 'codestral'),
+    'cursor': ('composer', 'cursor'),
 }
 DECLARATION = re.compile(r'^Author model: (\S+)$')
 EVIDENCE_FILES = ('result.txt', 'failure.txt', 'clean-result.txt', 'preexisting.txt', 'classification.json',
