@@ -26,7 +26,7 @@ class JobCountTests(unittest.TestCase):
 
     def test_cli_accepts_gh_pr_checks_json(self):
         checks = [{'name': 'verify-verdict', 'state': 'SUCCESS', 'workflow': 'verify-wazig'},
-                  {'name': 'planted-summary', 'state': 'SKIPPED', 'workflow': 'verify-wazig'}]
+                  {'name': 'nightly-summary', 'state': 'SKIPPED', 'workflow': 'planted-wazig'}]
         result = subprocess.run([sys.executable, str(SCRIPT)], input=json.dumps(checks),
                                 capture_output=True, text=True, check=True)
         self.assertEqual(json.loads(result.stdout), {'entries': 2, 'not_skipped': 1})

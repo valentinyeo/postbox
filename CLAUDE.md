@@ -23,9 +23,9 @@
 | Automerge waits for every non-AI check on the PR head, including unfurl-verification and the TDLib cache; missing, pending, skipped or failed checks block merging (IGSH-504) | `tools/lint-repeats.sh` rule B8 and `tools/test_no_comments.py` |
 | A planted failure counts only with the journey's own failure marker (SOFT-2624) | `tools/verify-wazig/harness.ps1`, `tools/verify-wazig/run.ps1`, `tools/verify-wazig/classify_red.py`, `tools/verify-wazig/classify-red.ps1` and `tools/test_verify_failure_marker.py`; shared version pins in `.github/workflows/verify.yml` are checked by the same test |
 | A release waits for recorded journey proof of every changed feature (SOFT-2595) | `tools/check_release_proof.py` in the `proof` job of `.github/workflows/release.yml`, `tools/test_release_proof.py` and `tools/lint-repeats.sh` rule B14 |
-| Every workflow has a concurrency group that cancels superseded runs; release.yml never cancels a publish (SOFT-2596) | `tools/lint-repeats.sh` rule B15 |
+| Every workflow has a concurrency group with `cancel-in-progress: true`; release.yml keys its group on `github.ref` so tags never cancel each other (SOFT-2596, SOFT-2846) | `tools/lint-repeats.sh` rule B15 |
 | A scheduled `map-upkeep` run keeps one rolling issue for map drift and red nightly journeys, and closes it when clean (SOFT-2596) | `tools/test-map-upkeep.sh` and `.github/workflows/map-upkeep.yml` |
-| Planted journey coverage cannot decrease and nightly verification retains its planted job (SOFT-2593) | `tools/check-planted.py`, `tools/test_check_planted.py` and `tools/lint-repeats.sh` rule B13 |
+| Planted journey coverage cannot decrease and the nightly `planted.yml` keeps its planted job and schedule, out of the PR workflow (SOFT-2593, SOFT-2846) | `tools/check-planted.py`, `tools/test_check_planted.py` and `tools/lint-repeats.sh` rule B13 |
 | PR journey verification runs on Windows before automerge for matching paths (SOFT-2591) | `tools/lint-repeats.sh` rule B11 |
 | A journey already red on the default branch does not fail the pull request (SOFT-2904) | `tools/verify-wazig/preexisting.py` from `.github/workflows/verify.yml` and `tools/test_preexisting_journey.py` |
 | Automerge only admits same-repository PRs by the repository owner (IGSH-635) | `tools/lint-repeats.sh` rule B9 and `tools/test_no_comments.py` |

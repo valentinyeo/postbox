@@ -1,1 +1,1 @@
-A direct message read by one recipient no longer shows a read tick.
+A one-to-one message read by its one recipient is shown as delivered instead of read, so the read chat loses its two blue ticks.
