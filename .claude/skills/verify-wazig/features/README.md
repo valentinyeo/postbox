@@ -16,6 +16,28 @@ The `slack-sort` journey verifies Slack last message ordering and incoming/sent 
 
 The `workspace-icons` journey verifies rounded Slack workspace icon badges, the missing-icon S fallback and the green WhatsApp handset through screenshot pixel checks, authenticated synthetic endpoints and retained disk caches. It runs on matching PRs.
 
+## Thirty-day source sweep
+
+Window: 2026-10-24 through 2026-11-23, ending at `291191a`. These are source dispositions, not live-pass results.
+
+| Recent change | Source | Journey or missing prerequisite |
+|---|---|---|
+| `e360ea7`: Slack autocomplete | `src/main.zig:11248`, `src/mention_index.zig:66` | `slack-mentions` requires the visible popup, exact token and sent payload; the duplicate hub text-change probe is retired. |
+| `6f3db97`: per-chat Slack Replies choice | `src/main.zig:24826` | `slack-threads` checks both saved chat styles against the account default. |
+| `febf904`, `2995401`: Read mark and chat isolation | `src/main.zig:18119`, `src/read_receipt.zig:18` | `read-ticks`; the older-read/newest-unread case exposes the current newest-own-only selection bug. |
+| `528e4e7`: loaded page thumbnail | `src/main.zig:8657`, `src/unfurl.zig` | `link-previews` checks card-image pixels. |
+| `eda5db7`: voice pill, message grouping and link-card redesign | `src/chat_screen.zig:27`, `src/chat_screen.zig:110`, `src/main.zig:22668` | Existing voice and link journeys cover their original assertions; the title-adjacent pill, Today line and one timestamp per sender group still need dedicated screenshot measurements. |
+| `ee076a1`: native new-message toasts, no tray | `src/toast.zig:195`, `src/toast.zig:216`, `src/main.zig:3023` | Unreachable in the current recipes: need a hosted notification-center capture and real activation input tied to a synthetic incoming message. An accepted notification API call alone is not visible proof. |
+| `16e332e`: redesigned update card | `src/main.zig:22718` | `quiet-status` exercises sync errors only; update-ready, downloading, staged and restart states need a pending-release fixture and screenshot assertions. Ordinary fixture startup suppresses update checks. |
+| `afac62f`: caret after emoji | `src/directwrite_edit.zig:192` | `caret` currently types ASCII; emoji caret alignment needs a mixed-text fixture and a measured glyph-edge oracle. |
+| `c12336f`, `180e120`: colour emoji in sidebar and reply preview | `src/emoji_draw.zig`, `src/main.zig:11211` | Picker glyph coverage is not sidebar/reply colour proof; need screenshot crops containing known colour glyphs. |
+| `643cc56`: stalled media download and retry | `src/media_drain.zig:112`, `src/media_drain.zig:122` | `media-speed` covers gone and server-error responses, not a never-answering download followed by a manual retry. Need a held media response and visible failure/retry capture. |
+| `907bf17`, `c8fe402`: sent image shown while upload is pending | `src/main.zig:4528`, `src/main.zig:10832` | `paste-image` proves staged and acknowledged images, not the interval before acknowledgement; need a held upload and pending-bubble pixel assertion. |
+| `e06be2d`, `7b593ed`, `a96e074`: thread broadcast, panel and orphan replies | `src/main.zig:24925`, `src/main.zig:25008`, `src/main.zig:24837` | `slack-thread-broadcast` and `slack-threads` use quoted-message-only hub rows and check sent payloads, folding and restart. |
+| `d506159`, `52bc120`: deletion and manual resend | `src/main.zig:5840`, `src/main.zig:5875` | `hub` and `hub-fault` check exact request identities and restored failed bubbles. |
+| `500ddc4`, `460e2a0`: archive return and retained intent | `src/main.zig:14216`, `src/main.zig:14525` | `archive-return`, `slack-archive`, `hub-archive` and `archive-inbox` retain their separate provider/local contracts. |
+| `b11fd97`, `521b4ab`, `727d046`: composer reveal, keyboard reply and chat-number keys | `src/directwrite_edit.zig`, `src/main.zig:20836`, `src/shortcuts.zig` | `drafts`, `reply`, `ctrl-badges` and `notrap`; keyboard reply now checks the exact focused-message first line rather than nonempty text. |
+
 ## Recent changes coverage
 
 - IGSH-1267: dictation finish and cancel -> `dictation-shortcuts` (asserts native keys, scoped durable sends, cancellation races, navigation disarming and Unicode multiline drafts)

@@ -21,7 +21,7 @@ class ProxyAssertions(unittest.TestCase):
         self.assertIn('changed or nonempty text alone', self.check_script(text)[0])
 
     def test_exit_and_success_proxies_fail(self):
-        for expression in ('$LASTEXITCODE -eq 0', '$child.ExitCode -eq 0', '$response.ok', '$?'):
+        for expression in ('$LASTEXITCODE -eq 0', '$exitCode -eq 0', '$child.ExitCode -eq 0', '$response.ok', '$?', '-not $errors', '$errors.Count -eq 0'):
             with self.subTest(expression=expression):
                 self.assertTrue(self.check_script(f'Assert-That ({expression}) "passed"'))
         self.assertTrue(self.check_script("if ($LASTEXITCODE -ne 0) { throw 'failed' }"))

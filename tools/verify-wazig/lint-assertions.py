@@ -67,11 +67,13 @@ def proxy(expression):
     parts = re.split(r'\s+-(?:and|or)\s+', value)
     if len(parts) > 1 and all(proxy(part) for part in parts):
         return 'proxy checks alone'
-    exit_check = r'\$(?:[\w.]+\.exitcode|lastexitcode|buildexit|exit|code)\s+-(?:c|i)?(?:eq|ne)\s+\d+'
+    exit_check = r'\$(?:[\w.]+\.exitcode|lastexitcode|buildexit|exitcode|exit|code)\s+-(?:c|i)?(?:eq|ne)\s+\d+'
     if re.fullmatch(exit_check, value) or (re.search(r'&\s+python\b', value) and re.search(exit_check + r'$', value)):
         return 'exit code alone'
     if re.fullmatch(r'\$[\w.]+\.(?:ok|success)|\$\?', value):
         return 'success flag alone'
+    if re.fullmatch(r'-not\s+\$(?:error|errors|failed|haserror)|\$(?:error|errors)\.count\s+-eq\s+0|\$(?:error|errors)\s+-eq\s+\$null', value):
+        return 'absence of errors alone'
     if re.search(r'\b(?:read-edit|composer_text|\w*text\w*|preview)\b|\$(?:before|after)(?![\w.])', value) and not re.search(r'\b(?:if|throw|return)\b|;', value):
         if re.search(r'\s+-(?:c|i)?ne\s+', value) and not re.search(r'\s+-(?:and|or)\s+', value):
             return 'changed or nonempty text alone'

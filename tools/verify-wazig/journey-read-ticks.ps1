@@ -36,7 +36,7 @@ function Get-ReadMarkBand($Bubble, $Canvas, $Desktop) {
 foreach ($chat in $chats) {
     Send-Keys $session '^f'
     Send-Keys $session $chat.name
-    $markId = if ($chat.mark) { $chat.mark } else { 'tick-own' }
+    $markId = if ($chat.ContainsKey('mark')) { $chat.mark } else { 'tick-own' }
     $null = Wait-Until {
         $shown = Read-Control $session messages
         $own = @($shown.messages | Where-Object { $_.id -eq $markId -and $_.bubble[2] -gt $_.bubble[0] -and $_.bubble[3] -gt $_.bubble[1] })

@@ -31,4 +31,4 @@ Preconditions: doctor passes, two unfiltered chats, Alpha selected and composer 
 - Search changes list positions; reset it before positional navigation.
 - Up/Down in a non-empty composer edits text; with an empty composer and loaded messages it can move the message highlight.
 - The fixture has no messages, so it cannot prove selection/scrolling within a message history or mark-read transport.
-- Source: `selectChat` (`src/main.zig:11997`) applies bounded/wrapping chat selection; `src/main.zig:20869-20892` handles Ctrl+1..9, Alt+1..9, edge and page keys. The Chats group at `src/shortcuts.zig:52-67` lists the discoverable chat keys.
+- Source: `selectChat` (`src/main.zig:12058`) applies bounded/wrapping chat selection; `src/main.zig:20917-20939` handles Ctrl+1..9, Alt+1..9, edge and page keys. The Chats group at `src/shortcuts.zig:52-67` lists the discoverable chat keys.
