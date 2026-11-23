@@ -132,9 +132,14 @@ class JudgeTests(unittest.TestCase):
         self.body = 'Fix search\n\nAuthor model: anthropic/claude-opus-5-5'
         self.evidence = '## verify-wazig-search\nresult.txt: JOURNEY PASSED: search\nside-effects.json: {"pendingSends": 2}'
 
-    def run_judge(self, model, body=None, key='k', needs=None, evidence=None):
+    def run_judge(self, model, body=None, key='k', needs=None, evidence=None, listed=None, fetch=None, fetch_error=None):
+        def fake_fetch(ignored):
+            if fetch_error:
+                raise fetch_error
+            return listed
         return MODULE.judge(needs or self.needs, self.body if body is None else body, 'pr', ['search'],
-                            self.evidence if evidence is None else evidence, 'diff', key, post=model, sleep=lambda seconds: None)
+                            self.evidence if evidence is None else evidence, 'diff', key, post=model,
+                            sleep=lambda seconds: None, fetch=fetch or fake_fetch, say=lambda line: None)
 
     def test_judge_comes_from_a_family_no_author_used(self):
         model = Model(reply('PASS'))
@@ -143,6 +148,69 @@ class JudgeTests(unittest.TestCase):
         model = Model(reply('PASS'))
         self.run_judge(model, body='Author model: openai/gpt-6.1-sol\nAuthor model: anthropic/claude')
         self.assertEqual(model.models, ['moonshotai/kimi-k2-instruct-0905'])
+
+    def test_judges_come_from_the_live_model_list(self):
+        listed = ['openai/gpt-oss-120b', 'moonshotai/kimi-k2-instruct', 'qwen/qwen3-32b',
+                  'llama-3.3-70b-versatile', 'whisper-large-v3', 'groq/compound']
+        model = Model(reply('PASS'))
+        result, _, used = self.run_judge(model, body='Author model: openai/gpt-6.1-sol', listed=listed)
+        self.assertEqual((result, used), ('PASS', 'moonshotai/kimi-k2-instruct'))
+        self.assertEqual(model.models, ['moonshotai/kimi-k2-instruct'])
+
+    def test_retired_model_404_moves_to_the_next_listed_judge(self):
+        listed = ['moonshotai/kimi-k2-instruct', 'qwen/qwen3-32b']
+        model = Model(http_error(404), reply('PASS'))
+        result, notes, used = self.run_judge(model, listed=listed)
+        self.assertEqual((result, used), ('PASS', 'qwen/qwen3-32b'))
+        self.assertEqual(model.models, ['moonshotai/kimi-k2-instruct', 'qwen/qwen3-32b'])
+        self.assertEqual(notes, [])
+
+    def test_live_list_keeps_the_author_family_exclusion(self):
+        listed = ['openai/gpt-oss-120b', 'moonshotai/kimi-k2-instruct', 'qwen/qwen3-32b',
+                  'meta-llama/llama-4-scout-17b-16e-instruct', 'llama-3.3-70b-versatile']
+        model = Model(reply('PASS'))
+        result, _, used = self.run_judge(model, body='Author model: openai/gpt-6.1-sol\nAuthor model: kimi/k2',
+                                         listed=listed)
+        self.assertEqual((result, used), ('PASS', 'qwen/qwen3-32b'))
+        self.assertEqual(model.models, ['qwen/qwen3-32b'])
+
+    def test_non_chat_and_unknown_models_are_never_judges(self):
+        listed = ['whisper-large-v3', 'playai-tts', 'meta-llama/llama-guard-4-12b',
+                  'nomic-embed-text-v1.5', 'groq/compound']
+        model = Model()
+        result, notes, used = self.run_judge(model, listed=listed)
+        self.assertEqual(result, 'FAIL')
+        self.assertIsNone(used)
+        self.assertEqual(model.models, [])
+        self.assertIn('no model from a family this PR did not author with', notes[0])
+
+    def test_listed_endpoint_failure_falls_back_to_the_static_list(self):
+        for fetch_error in (MODULE.urllib.error.URLError('down'), MODULE.urllib.error.HTTPError(
+                MODULE.MODELS_URL, 401, 'unauthorized', {}, None), ValueError('bad json')):
+            with self.subTest(error=type(fetch_error).__name__):
+                model = Model(reply('PASS'))
+                result, _, used = self.run_judge(model, fetch_error=fetch_error)
+                self.assertEqual((result, used), ('PASS', 'openai/gpt-oss-120b'))
+
+    def test_empty_list_also_falls_back_to_the_static_list(self):
+        model = Model(reply('PASS'))
+        self.assertEqual(self.run_judge(model, listed=[])[0], 'PASS')
+        self.assertEqual(model.models, ['openai/gpt-oss-120b'])
+
+    def test_the_run_prints_every_model_tried_and_skipped(self):
+        lines = []
+        MODULE.judge(self.needs, 'Author model: openai/gpt-6.1-sol', 'pr', ['search'], self.evidence, 'diff', 'k',
+                     post=Model(reply('PASS')),
+                     sleep=lambda seconds: None,
+                     fetch=lambda key: ['moonshotai/kimi-k2-instruct', 'whisper-large-v3', 'groq/compound'],
+                     say=lines.append)
+        printed = '\n'.join(lines)
+        self.assertIn('Groq lists 3 models', printed)
+        self.assertIn('skipped openai family: named by an `Author model:` line', printed)
+        self.assertIn('skipped whisper-large-v3: not a chat model', printed)
+        self.assertIn('skipped groq/compound: no known model family', printed)
+        self.assertIn('judges to try, in order: moonshotai/kimi-k2-instruct', printed)
+        self.assertIn('moonshotai/kimi-k2-instruct: answered', printed)
 
     def test_missing_unknown_or_exhausted_authors_fail_without_asking(self):
         bodies = ('', 'no line', '```\nAuthor model: anthropic/claude\n```', 'Author model: acme/mystery',
