@@ -249,7 +249,7 @@ class JourneyRegistryTests(unittest.TestCase):
         doctor = run.index('    Invoke-Doctor $session\n')
         marker = run.index("    'JOURNEY STARTED' | Set-Content (Join-Path $Evidence 'journey-started.txt')\n")
         self.assertEqual(marker, doctor + len('    Invoke-Doctor $session\n'))
-        planted = self.workflow['jobs']['planted']['steps']
+        planted = yaml.safe_load((ROOT / '.github/workflows/planted.yml').read_text())['jobs']['planted']['steps']
         script = next(step for step in planted if step.get('name') == 'Classify planted failure')['run']
         self.assertIn('tools/verify-wazig/classify-red.ps1', script)
         classifier = (self.tools / 'classify-red.ps1').read_text()

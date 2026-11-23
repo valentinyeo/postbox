@@ -1,6 +1,11 @@
 . "$PSScriptRoot/real-size-background.ps1"
 if ($env:VOICE_LANGUAGE_RESULTS) {
     . "$PSScriptRoot/journey-voice-language.ps1"
+} elseif ($env:VOICE_DOWNLOAD_RED) {
+    . "$PSScriptRoot/voice.ps1"
+    Invoke-VoiceJourney $session $messages
+    . "$PSScriptRoot/voice-download.ps1"
+    Invoke-VoiceDownloadJourney $session
 } else {
     . "$PSScriptRoot/voice.ps1"
     Invoke-VoiceJourney $session $messages
