@@ -42,6 +42,7 @@ class State:
         self.stamp = datetime.now(timezone.utc).isoformat(timespec='seconds').replace('+00:00', 'Z')
         self.image = png()
         self.sse_live_enabled = True
+        self.events_down = False
         self.poll_row = None
 
     def record(self, row):
@@ -153,6 +154,9 @@ class Handler(BaseHTTPRequestHandler):
         elif url.path.startswith('/v1/avatar/'):
             self.respond(404, {'error': 'unavailable'})
         elif url.path == '/v1/events':
+            if state.events_down:
+                self.respond(503, {'error': 'events down'})
+                return
             self.events()
         else:
             self.respond(404, {'error': 'unknown path'})
@@ -171,6 +175,9 @@ class Handler(BaseHTTPRequestHandler):
             return
         while True:
             with self.state.lock:
+                if self.state.events_down:
+                    self.close_connection = True
+                    return
                 if self.state.live and self.state.sse_live_enabled and last < 2:
                     self.event(2, 'msg', f'{ACCOUNT}:{ALPHA}')
                     self.close_connection = True
@@ -219,6 +226,15 @@ class Handler(BaseHTTPRequestHandler):
         elif self.path == '/fixture/mute-sse':
             with state.lock:
                 state.sse_live_enabled = False
+            self.respond(200, {'ok': True})
+        elif self.path == '/fixture/drop-events':
+            with state.lock:
+                state.events_down = True
+            self.respond(200, {'ok': True})
+        elif self.path == '/fixture/restore-events':
+            with state.lock:
+                state.events_down = False
+                state.lock.notify_all()
             self.respond(200, {'ok': True})
         elif self.path == '/fixture/stale-row':
             stamp = datetime.now(timezone.utc).isoformat(timespec='seconds').replace('+00:00', 'Z')

@@ -281,6 +281,13 @@
       "why": ""
     },
     {
+      "feature": "hub-sync-line",
+      "source": "main:updateSyncLine",
+      "proof": "hub-wake-refresh",
+      "status": "covered",
+      "why": ""
+    },
+    {
       "feature": "command_replies_slack",
       "source": "buildPaletteItems:command_replies_slack",
       "proof": "reply",
