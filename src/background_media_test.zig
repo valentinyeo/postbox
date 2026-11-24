@@ -45,6 +45,8 @@ const App = struct {
     media_attempt_count: usize = 0,
     media_unavailable: [512]u64 = [_]u64{0} ** 512,
     media_unavailable_count: usize = 0,
+    media_note_dirty: bool = false,
+    media_note_repaint_ms: u64 = 0,
     busy: bool = false,
     open_candidate: bool = false,
     pending_messages: bool = false,
@@ -134,6 +136,7 @@ const image_viewer = struct {
 };
 fn setStatus(_: *App, _: []const u8) void {}
 fn refreshMessages(_: *App) void {}
+fn saveMediaGone(_: *App, _: []const u8, _: []const u8) void {}
 fn finish(a: *App) void {
     const result = WacliResult{ .kind = .hub_media, .account = a.cache_tag, .jid = a.media_downloads[0].jid, .msg_id = a.media_downloads[0].id, .ok = true, .http_status = 200 };
     finishHubMedia(a, &result);
@@ -390,7 +393,7 @@ test "background wiring exhausted download retries and cache failures cannot blo
     for (0..max_media_retries) |attempt| {
         try std.testing.expect(a.busy);
         try std.testing.expectEqualStrings("file", a.started.slice());
-        noteMediaFailure(&a, a.background_media.jid.slice(), a.started.slice());
+        _ = noteMediaFailure(&a, a.background_media.jid.slice(), a.started.slice());
         a.busy = false;
         try std.testing.expect(!autoDownloadBackgroundMedia(&a));
         if (attempt + 1 < max_media_retries) {

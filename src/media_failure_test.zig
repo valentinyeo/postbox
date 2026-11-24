@@ -29,6 +29,11 @@ const win = struct {
 fn mediaDownloading(_: *const App, _: []const u8, _: []const u8) bool {
     return false;
 }
+
+var gone_saved: usize = 0;
+fn saveMediaGone(_: *App, _: []const u8, _: []const u8) void {
+    gone_saved += 1;
+}
 fn freeMediaSlot(_: *App) ?usize {
     return 1;
 }
@@ -49,7 +54,7 @@ fn fixture() App {
     return a;
 }
 fn failTerminally(a: *App, jid: []const u8, id: []const u8) void {
-    for (0..max_media_retries) |_| noteMediaFailure(a, jid, id);
+    for (0..max_media_retries) |_| _ = noteMediaFailure(a, jid, id);
 }
 
 test "media failure log identifies a scoped item without exposing its IDs" {
@@ -68,11 +73,11 @@ test "success suppression and transient failures are not terminal failures" {
     try std.testing.expect(mediaAttempted(&a, jid, id));
     try std.testing.expect(!mediaUnavailable(&a, jid, id));
     for (0..max_media_retries - 1) |_| {
-        noteMediaFailure(&a, jid, id);
+        _ = noteMediaFailure(&a, jid, id);
         try std.testing.expect(!mediaUnavailable(&a, jid, id));
     }
     try std.testing.expectEqual(@as(u64, 160_000), a.media_failures[0].retry_after_ms);
-    noteMediaFailure(&a, jid, id);
+    _ = noteMediaFailure(&a, jid, id);
     try std.testing.expect(mediaUnavailable(&a, jid, id));
     try std.testing.expect(!mediaUnavailable(&a, "other@example.invalid", id));
     try std.testing.expectEqual(@as(u8, 0), a.media_failures[0].count);
@@ -85,26 +90,40 @@ test "success suppression and transient failures are not terminal failures" {
     try std.testing.expect(!mediaAttempted(&a, jid, id));
 }
 
-test "IGSH-1689 a gone file is unavailable at once and a server error backs off from five seconds" {
+test "SOFT-3158 a gone file refreshes the link once then stops and is saved" {
     var a = fixture();
     const jid = a.chats[0].jid.slice();
     const id = a.messages[0].id.slice();
-    noteMediaFailureStatus(&a, jid, id, 410);
+    gone_saved = 0;
+    try std.testing.expect(!noteMediaFailureStatus(&a, jid, id, 410));
+    try std.testing.expect(!mediaUnavailable(&a, jid, id));
+    try std.testing.expectEqual(@as(u8, 1), a.media_failures[0].count);
+    try std.testing.expectEqual(@as(u64, 100_000 + media_drain.gone_refresh_ms), a.media_failures[0].retry_after_ms);
+    try std.testing.expectEqual(@as(usize, 0), gone_saved);
+    try std.testing.expect(!a.media_note_dirty);
+    try std.testing.expect(noteMediaFailureStatus(&a, jid, id, 410));
     try std.testing.expect(mediaUnavailable(&a, jid, id));
     try std.testing.expectEqual(@as(u8, 0), a.media_failures[0].count);
+    try std.testing.expectEqual(@as(usize, 1), gone_saved);
+    try std.testing.expect(a.media_note_dirty);
+}
+
+test "IGSH-1689 a server error backs off from five seconds" {
     var b = fixture();
-    noteMediaFailureStatus(&b, jid, id, 502);
+    const jid = b.chats[0].jid.slice();
+    const id = b.messages[0].id.slice();
+    _ = noteMediaFailureStatus(&b, jid, id, 502);
     try std.testing.expectEqual(@as(u64, 100_000 + 5_000), b.media_failures[0].retry_after_ms);
-    noteMediaFailureStatus(&b, jid, id, 429);
+    _ = noteMediaFailureStatus(&b, jid, id, 429);
     try std.testing.expectEqual(@as(u64, 100_000 + 10_000), b.media_failures[0].retry_after_ms);
-    noteMediaFailureStatus(&b, jid, id, 502);
+    _ = noteMediaFailureStatus(&b, jid, id, 502);
     try std.testing.expectEqual(@as(u64, 100_000 + 20_000), b.media_failures[0].retry_after_ms);
     try std.testing.expect(!mediaUnavailable(&b, jid, id));
     var c = fixture();
-    for (0..max_transient_media_retries - 1) |_| noteMediaFailureStatus(&c, jid, id, 502);
+    for (0..max_transient_media_retries - 1) |_| _ = noteMediaFailureStatus(&c, jid, id, 502);
     try std.testing.expect(!mediaUnavailable(&c, jid, id));
     try std.testing.expectEqual(@as(u64, 100_000 + 60_000), c.media_failures[0].retry_after_ms);
-    noteMediaFailureStatus(&c, jid, id, 502);
+    _ = noteMediaFailureStatus(&c, jid, id, 502);
     try std.testing.expect(mediaUnavailable(&c, jid, id));
 }
 
@@ -112,11 +131,11 @@ test "IGSH-1689 a missing file keeps the short retry and then gives up" {
     var a = fixture();
     const jid = a.chats[0].jid.slice();
     const id = a.messages[0].id.slice();
-    noteMediaFailureStatus(&a, jid, id, 404);
+    _ = noteMediaFailureStatus(&a, jid, id, 404);
     try std.testing.expectEqual(@as(u64, 100_000 + 30_000), a.media_failures[0].retry_after_ms);
     try std.testing.expect(!mediaUnavailable(&a, jid, id));
-    noteMediaFailureStatus(&a, jid, id, 404);
-    noteMediaFailureStatus(&a, jid, id, 404);
+    _ = noteMediaFailureStatus(&a, jid, id, 404);
+    _ = noteMediaFailureStatus(&a, jid, id, 404);
     try std.testing.expect(mediaUnavailable(&a, jid, id));
 }
 
@@ -135,7 +154,7 @@ test "manual retry resets terminal failure before starting or queuing" {
             try std.testing.expectEqualStrings(jid, a.pending_download_jid.slice());
         } else try std.testing.expectEqual(@as(usize, 1), a.started);
         if (media_drain.wazi_135) {
-            noteMediaFailure(&a, jid, id);
+            _ = noteMediaFailure(&a, jid, id);
             try std.testing.expect(!mediaUnavailable(&a, jid, id));
             try std.testing.expectEqual(@as(u8, 1), a.media_failures[0].count);
         }
@@ -145,7 +164,7 @@ test "manual retry resets terminal failure before starting or queuing" {
 test "full retry table falls back to terminal marking and marker storage stays bounded" {
     var a = fixture();
     for (&a.media_failures, 0..) |*entry, i| entry.* = .{ .hash = @intCast(i + 1), .count = 1 };
-    noteMediaFailure(&a, "chat@example.invalid", "overflow-id");
+    _ = noteMediaFailure(&a, "chat@example.invalid", "overflow-id");
     try std.testing.expect(mediaUnavailable(&a, "chat@example.invalid", "overflow-id"));
     try std.testing.expect(mediaAttempted(&a, "chat@example.invalid", "overflow-id"));
     for (0..a.media_unavailable.len + 1) |i| {

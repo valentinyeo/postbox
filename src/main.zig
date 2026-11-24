@@ -1106,6 +1106,8 @@ const App = struct {
     media_attempt_count: usize = 0,
     media_unavailable: [512]u64 = [_]u64{0} ** 512,
     media_unavailable_count: usize = 0,
+    media_note_dirty: bool = false,
+    media_note_repaint_ms: u64 = 0,
     media_burst_started_ms: u64 = 0,
     media_burst_files: usize = 0,
     media_resume_after_ms: u64 = 0,
@@ -7328,50 +7330,74 @@ fn mediaFailureLog(buffer: []u8, account: []const u8, jid: []const u8, id: []con
     return std.fmt.bufPrint(buffer, "media: download failed status={d} ref={s}", .{ status, &hex }) catch "media: download failed";
 }
 
-fn noteMediaFailure(a: *App, jid: []const u8, id: []const u8) void {
-    noteMediaFailureStatus(a, jid, id, 0);
+fn noteMediaFailure(a: *App, jid: []const u8, id: []const u8) bool {
+    return noteMediaFailureStatus(a, jid, id, 0);
 }
 
-fn noteMediaFailureStatus(a: *App, jid: []const u8, id: []const u8, status: u32) void {
+fn noteMediaFailureStatus(a: *App, jid: []const u8, id: []const u8, status: u32) bool {
     const hash = played.Set.pairKey(jid, id);
-    var count: u8 = 0;
+    var failures: u8 = 0;
     var matched: ?*MediaFailure = null;
     for (&a.media_failures) |*entry| {
         if (entry.hash == hash) {
             matched = entry;
-            count = entry.count;
+            failures = entry.count;
             break;
         }
     }
-    count += 1;
-    const retry_after_ms = win.GetTickCount64() + mediaRetryDelayMs(status, count);
+    const decision = media_drain.finish(false, status, failures);
+    failures +%= 1;
     const retry_limit: u8 = if (mediaTransientStatus(status)) max_transient_media_retries else max_media_retries;
-    if (status == 410 or count >= retry_limit) {
+    if (decision.gone or failures >= retry_limit) {
         if (matched) |entry| {
             entry.hash = 0;
             entry.count = 0;
         }
         markMediaUnavailable(a, jid, id);
-        return;
+        if (decision.gone) {
+            saveMediaGone(a, jid, id);
+            a.media_note_dirty = true;
+        }
+        return decision.gone;
     }
+    const retry_after_ms = win.GetTickCount64() + if (decision.refresh) media_drain.gone_refresh_ms else mediaRetryDelayMs(status, failures);
     if (matched) |entry| {
-        entry.count = count;
+        entry.count = failures;
         entry.retry_after_ms = retry_after_ms;
-        return;
+        return false;
     }
     for (&a.media_failures) |*entry| {
         if (entry.hash == 0 and entry.count == 0) {
             entry.hash = hash;
-            entry.count = count;
+            entry.count = failures;
             entry.retry_after_ms = retry_after_ms;
-            return;
+            return false;
         }
     }
     markMediaUnavailable(a, jid, id);
+    return false;
 }
 
 fn isDownloadableMedia(message: *const Message) bool {
     return !message.revoked and media_drain.downloadable(message.media_type.slice());
+}
+
+fn saveMediaGone(a: *App, jid: []const u8, id: []const u8) void {
+    const path = messagesDirPath(a, "gone-media.txt") orelse return;
+    defer a.allocator.free(path);
+    var buffer: [24]u8 = undefined;
+    const line = std.fmt.bufPrint(&buffer, "{x:0>16}\n", .{played.Set.pairKey(jid, id)}) catch return;
+    appendHashLine(a, path, line);
+}
+
+fn loadGoneMedia(a: *App, data: []const u8) void {
+    var stored = played.Set{};
+    stored.load(data);
+    for (stored.hashes[0..@min(stored.count, stored.hashes.len)]) |hash| {
+        if (a.media_unavailable_count >= a.media_unavailable.len) break;
+        a.media_unavailable[a.media_unavailable_count] = hash;
+        a.media_unavailable_count += 1;
+    }
 }
 
 fn autoDownloadNextMedia(a: *App) bool {
@@ -7408,7 +7434,7 @@ fn nextOpenMediaCandidate(a: *App, now_ms: u64) ?usize {
             .has_id = id.len > 0,
             .has_local_path = message.local_path.len > 0,
             .in_flight = mediaDownloading(a, chat_jid, id),
-            .attempted = mediaAttempted(a, chat_jid, id),
+            .attempted = mediaAttempted(a, chat_jid, id) or mediaUnavailable(a, chat_jid, id),
             .retry_after_ms = retry_after_ms,
             .size_bytes = message.media_size,
             .whatsapp_store = true,
@@ -7427,6 +7453,15 @@ fn drainMediaDownloads(a: *App) void {
         if (!started) started = autoDownloadBackgroundMedia(a);
         steps += 1;
     }
+    if (a.media_note_dirty) flushMediaNote(a);
+}
+
+fn flushMediaNote(a: *App) void {
+    const now = win.GetTickCount64();
+    if (!media_drain.noteRepaintDue(a.media_note_repaint_ms, now)) return;
+    a.media_note_dirty = false;
+    a.media_note_repaint_ms = now;
+    refreshMessages(a);
 }
 
 fn observeBackgroundMediaChats(a: *App, rows: []const std.json.Value) void {
@@ -7512,6 +7547,7 @@ fn applyBackgroundMedia(a: *App, result: *const WacliResult) void {
             .downloadable = !getBool(object, "Revoked") and media_drain.downloadable(getString(object, "MediaType")),
             .has_id = id.len > 0,
             .has_local_path = path.len > 0 and fileExistsUtf8(path),
+            .attempted = mediaUnavailable(a, batch.jid.slice(), id),
             .size_bytes = size,
             .whatsapp_store = true,
         };
@@ -8253,7 +8289,7 @@ fn checkMediaDownload(a: *App) void {
             if (slot.hub_pending and slot.hub_retry_ms > 0 and win.GetTickCount64() >= slot.hub_retry_ms) _ = enqueueHubMedia(a, slot);
             if (!slot.hub_pending or !media_drain.hubStalled(slot.started_ms, win.GetTickCount64())) continue;
             appendLaunchLog(a, "media: download timed out with no answer");
-            noteMediaFailure(a, slot.jid.slice(), slot.id.slice());
+            _ = noteMediaFailure(a, slot.jid.slice(), slot.id.slice());
             if (!stalled) {
                 stalled_jid.set(slot.jid.slice());
                 stalled_id.set(slot.id.slice());
@@ -8265,7 +8301,6 @@ fn checkMediaDownload(a: *App) void {
             image_viewer.downloadFinished(a, stalled_jid.slice(), stalled_id.slice(), false);
             if (std.mem.eql(u8, stalled_id.slice(), a.audio_chain_id.slice())) a.audio_chain_waiting = false;
             setStatus(a, "Media download timed out, tap to retry");
-            refreshMessages(a);
         }
         if (a.audio_chain_waiting) {
             for (a.messages[0..a.message_count]) |*message| {
@@ -8298,7 +8333,7 @@ fn checkMediaDownload(a: *App) void {
                 markMediaAttempted(a, slot.jid.slice(), slot.id.slice());
                 clearMediaFailure(a, slot.jid.slice(), slot.id.slice());
             } else {
-                noteMediaFailure(a, slot.jid.slice(), slot.id.slice());
+                _ = noteMediaFailure(a, slot.jid.slice(), slot.id.slice());
             }
             image_viewer.downloadFinished(a, slot.jid.slice(), slot.id.slice(), code == 0);
             if (std.mem.eql(u8, slot.id.slice(), a.audio_chain_id.slice())) chain_slot_done = true;
@@ -8311,7 +8346,7 @@ fn checkMediaDownload(a: *App) void {
     if (finished_ok + finished_failed > 0) {
         drainMediaDownloads(a);
         startSync(a);
-        refreshMessages(a);
+        if (finished_ok > 0) refreshMessages(a);
         if (a.audio_chain_waiting and chain_slot_done) {
             a.audio_chain_waiting = false;
             var chain_started = false;
@@ -22335,6 +22370,13 @@ pub fn main(init: std.process.Init) !void {
     loadArchiveState(app);
     app.read_path = providerStatePath(app, "pending-reads.txt") orelse &.{};
     loadPendingReads(app);
+    if (messagesDirPath(app, "gone-media.txt")) |path| {
+        defer init.gpa.free(path);
+        if (readFileWin(init.gpa, path, 128 * 1024)) |data| {
+            defer init.gpa.free(data);
+            loadGoneMedia(app, data);
+        }
+    }
     if (messagesDirPath(app, "read-state.txt")) |path| {
         defer init.gpa.free(path);
         if (readFileWin(init.gpa, path, 4 * 1024 * 1024)) |data| {
@@ -24959,12 +25001,12 @@ fn applyHubResult(a: *App, result: *const WacliResult) void {
                     markMediaAttempted(a, slot.jid.slice(), slot.id.slice());
                     clearMediaFailure(a, slot.jid.slice(), slot.id.slice());
                 } else {
-                    noteMediaFailureStatus(a, slot.jid.slice(), slot.id.slice(), result.http_status);
+                    _ = noteMediaFailureStatus(a, slot.jid.slice(), slot.id.slice(), result.http_status);
                     setStatus(a, if (result.http_status == 202) "Media download timed out" else "Media download failed");
                     if (std.mem.eql(u8, slot.id.slice(), a.audio_chain_id.slice())) a.audio_chain_waiting = false;
                 }
                 image_viewer.downloadFinished(a, slot.jid.slice(), slot.id.slice(), ok);
-                refreshMessages(a);
+                if (ok) refreshMessages(a);
                 slot.* = .{};
                 break;
             }
