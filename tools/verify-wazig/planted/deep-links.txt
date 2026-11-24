@@ -1,0 +1,1 @@
+WhatsApp deep links ignore the account and open the wrong account for a shared contact.

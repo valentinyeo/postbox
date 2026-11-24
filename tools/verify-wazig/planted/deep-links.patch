@@ -1,0 +1,12 @@
+diff --git a/src/deep_link.zig b/src/deep_link.zig
+--- a/src/deep_link.zig
++++ b/src/deep_link.zig
+@@ -130,7 +130,7 @@
+     return switch (provider) {
+         .whatsapp => blk: {
+             if (splitWhatsAppJid(jid)) |parts| {
+-                break :blk std.mem.eql(u8, parts.account, wanted_account) and whatsAppIdMatches(parts.chat, wanted_chat);
++                break :blk whatsAppIdMatches(parts.chat, wanted_chat);
+             }
+             const account_match = std.mem.eql(u8, view_account, wanted_account) or std.mem.eql(u8, account, wanted_account);
+             break :blk account_match and whatsAppIdMatches(jid, wanted_chat);

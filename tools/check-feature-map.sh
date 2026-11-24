@@ -33,7 +33,27 @@ if limit < 0 or gaps > limit:
     errors.append(f'remove gaps or add proofs: {gaps} gaps exceeds limit {limit}')
 elif gaps < limit:
     print(f'lower tools/verify-wazig/feature-map-limits.txt to {gaps}')
-print(f'check-feature-map: {len(rows)} features, {gaps} gaps (limit {limit})')
+proven = {row['proof'] for row in rows if row['status'] == 'covered'}
+listed = {}
+for line in Path('tools/verify-wazig/unproven-journeys.txt').read_text().splitlines():
+    if not line.strip() or line.lstrip().startswith('#'):
+        continue
+    parts = line.split(None, 1)
+    name = parts[0]
+    reason = parts[1].strip() if len(parts) > 1 else ''
+    if name in listed:
+        errors.append(f'list {name} once in tools/verify-wazig/unproven-journeys.txt')
+    if not reason:
+        errors.append(f'give a reason for {name} in tools/verify-wazig/unproven-journeys.txt')
+    if name not in journeys:
+        errors.append(f'drop {name} from tools/verify-wazig/unproven-journeys.txt; no journey has that name')
+    listed[name] = reason
+for journey in sorted(journeys - proven - set(listed)):
+    errors.append(f'add a feature row to tools/verify-wazig/feature-map.json whose proof is {journey}, or list it with a reason in tools/verify-wazig/unproven-journeys.txt')
+for journey in sorted(set(listed) & proven):
+    print(f'remove {journey} from tools/verify-wazig/unproven-journeys.txt; a feature row proves it now')
+print(f'check-feature-map: {len(rows)} features, {gaps} gaps (limit {limit}), {len(journeys) - len(proven & journeys)} journeys without a feature row')
+
 if errors:
     sys.exit('\n'.join(errors))
 PY

@@ -1,0 +1,11 @@
+send-independence runs without recorded evidence; give it a validator before it backs a feature row
+composer-border runs without recorded evidence; give it a validator before it backs a feature row
+caret runs without recorded evidence; give it a validator before it backs a feature row
+reply-unarchive runs without recorded evidence; give it a validator before it backs a feature row
+app-icon runs without recorded evidence; give it a validator before it backs a feature row
+archive-return runs without recorded evidence; give it a validator before it backs a feature row
+notrap is the negative control for the planted-bug harness; it asserts no behaviour of its own
+hub-fault proves the hub-unavailable path; map it when its evidence names the user-facing result
+hub-migration-before-rename shares the crash-recovery evidence that hub-crash-recovery already cites
+hub-rollback proves the downgrade path; map it when its evidence names the user-facing result
+hub-archive proves archive intent stays local; map it when its evidence names the user-facing result

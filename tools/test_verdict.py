@@ -13,6 +13,7 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / 'tools/verify-wazig/verifier.py'
+TIMEOUT_LINE = 'Timed out: settled typed search'
 SPEC = importlib.util.spec_from_file_location('verifier', SCRIPT)
 MODULE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(MODULE)
@@ -350,9 +351,57 @@ class JudgeTests(unittest.TestCase):
     def test_red_job_names_the_failing_journey(self):
         evidence = ('## verify-wazig-voice\nfailure.txt: voice: playback stalled\n\n'
                     '## verify-wazig-search\nfailure.txt: search: chats were not filtered')
-        self.assertEqual(MODULE.failure_lines(evidence),
-                         ['verify-wazig-voice failure.txt: voice: playback stalled',
-                          'verify-wazig-search failure.txt: search: chats were not filtered'])
+        self.assertEqual(MODULE.evidence_failures(evidence),
+                         [('verify-wazig-voice', 'failure.txt: voice: playback stalled'),
+                          ('verify-wazig-search', 'failure.txt: search: chats were not filtered')])
+
+    def test_a_timed_out_evidence_line_fails_without_the_model(self):
+        for line in ('failure.txt: ' + TIMEOUT_LINE, 'result.txt: ' + TIMEOUT_LINE):
+            with self.subTest(line=line):
+                evidence = f'## verify-wazig-search\n{line}\n'
+                model = Model(reply('PASS'))
+                result, notes, used = self.run_judge(model, evidence=evidence)
+                self.assertEqual((result, used), ('FAIL', None))
+                self.assertEqual(model.models, [])
+                self.assertIn('verify-wazig-search ' + line, notes)
+
+    def test_the_journey_failure_marker_fails_without_the_model(self):
+        evidence = ('## verify-wazig-search\n'
+                    'journey-check-failed.txt: search: settled typed search Verification through ^f\n'
+                    'clean-result.txt: success')
+        model = Model(reply('PASS'))
+        result, notes, used = self.run_judge(model, evidence=evidence)
+        self.assertEqual((result, used), ('FAIL', None))
+        self.assertEqual(model.models, [])
+        self.assertEqual(notes, ['verify-wazig-search journey-check-failed.txt: '
+                                'search: settled typed search Verification through ^f'])
+
+    def test_a_failure_already_red_on_the_default_branch_still_reaches_the_judge(self):
+        evidence = ('## verify-wazig-search\n'
+                    'preexisting.txt: preexisting search failed in https://example.test/run/9\n'
+                    'failure.txt: search: Timed out: settled typed search\n'
+                    'journey-check-failed.txt: search: settled typed search\n'
+                    'clean-result.txt: preexisting')
+        model = Model(reply('PASS'))
+        result, _, used = self.run_judge(model, evidence=evidence)
+        self.assertEqual((result, used), ('PASS', 'openai/gpt-oss-120b'))
+        self.assertEqual(model.models, ['openai/gpt-oss-120b'])
+
+    def test_a_clean_evidence_folder_still_reaches_the_judge(self):
+        model = Model(reply('PASS'))
+        evidence = '## verify-wazig-search\nresult.txt: JOURNEY PASSED: search\nclean-result.txt: success'
+        result, _, used = self.run_judge(model, evidence=evidence)
+        self.assertEqual((result, used), ('PASS', 'openai/gpt-oss-120b'))
+
+    def test_the_marker_file_reaches_the_judge_digest(self):
+        with tempfile.TemporaryDirectory() as temp:
+            folder = Path(temp) / 'verify-wazig-search'
+            folder.mkdir()
+            (folder / 'journey-check-failed.txt').write_text('search: settled typed search\n')
+            text = MODULE.digest(temp)
+            self.assertIn('journey-check-failed.txt: search: settled typed search', text)
+            self.assertEqual(MODULE.evidence_failures(text),
+                             [('verify-wazig-search', 'journey-check-failed.txt: search: settled typed search')])
 
     def test_reply_parsing_takes_the_first_object(self):
         self.assertEqual(MODULE.parse_reply(reply('PASS') + ' then ' + reply('FAIL')), ('PASS', [], ''))

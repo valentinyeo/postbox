@@ -29,6 +29,34 @@ pub const State = struct {
     }
 };
 
+pub const Gap = struct {
+    since: ?i64 = null,
+    count: u32 = 0,
+    active: bool = false,
+
+    pub fn begin(self: *Gap, since: i64) void {
+        self.* = .{ .since = if (since > 0) since else null, .active = true };
+    }
+
+    pub fn observe(self: *Gap, unread: i64) void {
+        if (!self.active) return;
+        const counted: u32 = @intCast(@max(unread, 1));
+        self.count = self.count +| counted;
+    }
+
+    pub fn finish(self: *Gap) ?u32 {
+        if (!self.active) return null;
+        const count = self.count;
+        self.* = .{};
+        return count;
+    }
+};
+
+pub fn gapLabel(buffer: []u8, count: u32, clock: []const u8) []const u8 {
+    if (clock.len == 0) return std.fmt.bufPrint(buffer, "{d} new", .{count}) catch "New messages";
+    return std.fmt.bufPrint(buffer, "{d} new since {s}", .{ count, clock }) catch "New messages";
+}
+
 pub fn incoming(messages: []const std.json.Value, after: i64) ?std.json.ObjectMap {
     var latest = after;
     var result: ?std.json.ObjectMap = null;
@@ -64,6 +92,23 @@ test "incoming alert ignores own messages reactions history and chooses newest h
     const after = media_age.unixSeconds("2026-10-28T10:00:00Z").?;
     try std.testing.expectEqualStrings("new", incoming(parsed.value.array.items, after).?.get("MsgID").?.string);
     try std.testing.expect(incoming(parsed.value.array.items, after + 1) == null);
+}
+
+test "a gap counts one chat as one message and finishes once" {
+    var buffer: [63]u8 = undefined;
+    var gap: Gap = .{};
+    try std.testing.expect(gap.finish() == null);
+    gap.observe(9);
+    try std.testing.expectEqual(@as(u32, 0), gap.count);
+    gap.begin(0);
+    try std.testing.expectEqual(@as(?i64, null), gap.since);
+    gap.observe(3);
+    gap.observe(0);
+    try std.testing.expectEqual(@as(u32, 4), gap.count);
+    try std.testing.expectEqual(@as(?u32, 4), gap.finish());
+    try std.testing.expect(gap.finish() == null);
+    try std.testing.expectEqualStrings("4 new since 08:45", gapLabel(&buffer, 4, "08:45"));
+    try std.testing.expectEqualStrings("1 new", gapLabel(&buffer, 1, ""));
 }
 
 test "notification baselines isolate accounts avoid startup replay and never move backwards" {

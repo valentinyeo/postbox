@@ -281,6 +281,13 @@
       "why": ""
     },
     {
+      "feature": "hub-sync-line",
+      "source": "main:updateSyncLine",
+      "proof": "hub-wake-refresh",
+      "status": "covered",
+      "why": ""
+    },
+    {
       "feature": "command_replies_slack",
       "source": "buildPaletteItems:command_replies_slack",
       "proof": "reply",
@@ -596,6 +603,13 @@
       "why": ""
     },
     {
+      "feature": "dictation-live",
+      "source": "src:dictation-live",
+      "proof": "dictation-live",
+      "status": "covered",
+      "why": ""
+    },
+    {
       "feature": "gif-picker",
       "source": "src:gif-picker",
       "proof": "gif-picker",
@@ -647,9 +661,9 @@
     {
       "feature": "window-title",
       "source": "AGENTS:window-title",
-      "proof": "GAP",
-      "status": "GAP",
-      "why": "No journey asserts this complete behavior end to end."
+      "proof": "window",
+      "status": "covered",
+      "why": ""
     },
     {
       "feature": "font-and-scale",
@@ -746,6 +760,90 @@
       "feature": "real-size-inbox",
       "source": "tools/verify-wazig/real_size_seed.py",
       "proof": "real-size",
+      "status": "covered",
+      "why": ""
+    },
+    {
+      "feature": "sidebar-panel-surface",
+      "source": "tools/verify-wazig/check-sidebar-surface.py",
+      "proof": "sidebar-surface",
+      "status": "covered",
+      "why": ""
+    },
+    {
+      "feature": "deep-links",
+      "source": "src/deep_link.zig",
+      "proof": "deep-links",
+      "status": "covered",
+      "why": ""
+    },
+    {
+      "feature": "ctrl-shortcut-badges",
+      "source": "tools/verify-wazig/check-ctrl-badges-evidence.py",
+      "proof": "ctrl-badges",
+      "status": "covered",
+      "why": ""
+    },
+    {
+      "feature": "icon-tooltips",
+      "source": "tools/verify-wazig/check-icon-hints-evidence.py",
+      "proof": "icon-hints",
+      "status": "covered",
+      "why": ""
+    },
+    {
+      "feature": "media-layout-fit",
+      "source": "tools/verify-wazig/check-media-fit-evidence.py",
+      "proof": "media-fit",
+      "status": "covered",
+      "why": ""
+    },
+    {
+      "feature": "archived-inbox-list",
+      "source": "tools/verify-wazig/evidence-archive-inbox.py",
+      "proof": "archive-inbox",
+      "status": "covered",
+      "why": ""
+    },
+    {
+      "feature": "archived-chats-in-palette",
+      "source": "tools/verify-wazig/check-palette-archived-evidence.py",
+      "proof": "palette-archived",
+      "status": "covered",
+      "why": ""
+    },
+    {
+      "feature": "slack-archive-label",
+      "source": "tools/verify-wazig/check-slack-archive-evidence.py",
+      "proof": "slack-archive",
+      "status": "covered",
+      "why": ""
+    },
+    {
+      "feature": "thread-broadcast-toggle",
+      "source": "tools/verify-wazig/check-slack-thread-broadcast-evidence.py",
+      "proof": "slack-thread-broadcast",
+      "status": "covered",
+      "why": ""
+    },
+    {
+      "feature": "repaint-budget",
+      "source": "tools/verify-wazig/evidence-repaint.py",
+      "proof": "repaint",
+      "status": "covered",
+      "why": ""
+    },
+    {
+      "feature": "hub-crash-recovery",
+      "source": "tools/verify-wazig/check-hub-migration-crash-evidence.py",
+      "proof": "hub-migration-crash",
+      "status": "covered",
+      "why": ""
+    },
+    {
+      "feature": "exit_record",
+      "source": "reportPreviousExit",
+      "proof": "exit-record",
       "status": "covered",
       "why": ""
     }

@@ -12,6 +12,11 @@
             "type": "command",
             "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/preflight-guard.sh",
             "timeout": 900
+          },
+          {
+            "type": "command",
+            "command": "sh -c 'f=\"$HOME/.claude/hooks/heavy-local-guard.py\"; [ -f \"$f\" ] || exit 0; exec /usr/bin/python3 \"$f\"'",
+            "timeout": 5
           }
         ]
       }

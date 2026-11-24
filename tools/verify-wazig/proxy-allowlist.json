@@ -65,6 +65,11 @@
     "reason": "Audio installation is a runner prerequisite; signed archive hashes and the voice journey playback and pixel checks supply independent proof."
   },
   {
+    "file": "journey-deep-links.ps1",
+    "assertion": "$child.ExitCode -eq 0",
+    "reason": "Every caller right after it proves the visible result with a Wait-Until on the opened chat, target message and screenshot, so this exit only reports that the forwarder delivered the link."
+  },
+  {
     "file": "journey-drafts.ps1",
     "assertion": "$recorder.ExitCode -eq 0",
     "reason": "The recorder process exit only guards evidence capture; exact native draft text, UIA selection, geometry and screenshot comparisons assert the feature."

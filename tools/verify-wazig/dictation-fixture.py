@@ -1,4 +1,8 @@
+import base64
+import hashlib
 import json
+import struct
+import threading
 import os
 import re
 from urllib.parse import parse_qs, urlsplit
@@ -32,9 +36,17 @@ class DictationHandler(Handler):
 
     def do_GET(self):
         self.wire_path = self.path
+        url = urlsplit(self.path)
+        if url.path == '/v1/listen':
+            self.live_dictation(parse_qs(url.query))
+            return
         if not self.authorized():
             return
-        url = urlsplit(self.path)
+        if url.path == '/dictation-live/advance':
+            with self.state.lock:
+                self.state.live_advance.set()
+            self.respond(200, {'status': 'ok'})
+            return
         query = parse_qs(url.query)
         if url.path == '/v1/wazig/chats':
             rows = [] if query.get('archived') == ['true'] else [
@@ -114,3 +126,104 @@ class DictationHandler(Handler):
             reply = {key: previous[key] for key in ('client_id', 'msg_id', 'ts', 'status')}
             self.respond(200, reply, body=body, source_provider='slack', source_account=DICTATION_ACCOUNT,
                          accepted=not duplicate, duplicate=duplicate)
+
+    def live_frame(self, opcode, data, final=True):
+        header = bytes([(0x80 if final else 0) | opcode])
+        length = len(data)
+        header += bytes([length]) if length < 126 else b'\x7e' + struct.pack('!H', length)
+        self.wfile.write(header + data)
+        self.wfile.flush()
+
+    def live_read(self, count):
+        data = self.rfile.read(count)
+        if len(data) != count:
+            raise ConnectionError('truncated fixture WebSocket')
+        return data
+
+    def live_result(self, transcript, final, language, fragmented=False):
+        data = json.dumps(dict(type='Results', start=0, duration=1, is_final=final,
+                               channel=dict(alternatives=[dict(transcript=transcript, languages=[language])]))).encode()
+        if fragmented:
+            middle = len(data) // 2
+            self.live_frame(1, data[:middle], final=False)
+            self.live_frame(0, data[middle:])
+        else:
+            self.live_frame(1, data)
+
+    def live_dictation(self, query):
+        expected = dict(model=['nova-3'], smart_format=['true'], interim_results=['true'],
+                        encoding=['linear16'], sample_rate=['16000'], channels=['1'], tag=['wazig'])
+        language = query.get('language')
+        if language == ['multi']:
+            expected.update(language=['multi'], language_hint=['en', 'de'])
+        elif language in (['en'], ['de']):
+            expected['language'] = language
+        if (query != expected or self.headers.get('Upgrade', '').lower() != 'websocket'
+                or self.headers.get('Authorization', '').strip() != 'Token'):
+            self.respond(400, {'error': 'invalid live dictation request'})
+            return
+        key = self.headers.get('Sec-WebSocket-Key', '')
+        accept = base64.b64encode(hashlib.sha1((key + '258EAFA5-E914-47DA-95CA-C5AB0DC85B11').encode()).digest()).decode()
+        self.send_response(101)
+        self.send_header('Upgrade', 'websocket')
+        self.send_header('Connection', 'Upgrade')
+        self.send_header('Sec-WebSocket-Accept', accept)
+        self.end_headers()
+        self.wfile.flush()
+        self.connection.settimeout(30)
+        advance = threading.Event()
+        with self.state.lock:
+            self.state.live_advance = advance
+        selected = language[0]
+        detected = 'de' if selected == 'de' else 'en'
+        first, revised, final = ('Grü', 'Grüße aus', 'Grüße aus Berlin.') if detected == 'de' else ('hello', 'hello world', 'Hello world.')
+        stage = 0
+        audio_bytes = 0
+        self.state.record(dict(kind='dictation-live', stage='open', language=selected, query=query))
+        self.close_connection = True
+        try:
+            while True:
+                flags, size = self.live_read(2)
+                opcode = flags & 15
+                if not flags & 128 or not size & 128:
+                    raise ValueError('fixture requires complete masked client frames')
+                size &= 127
+                if size == 126:
+                    size = struct.unpack('!H', self.live_read(2))[0]
+                elif size == 127:
+                    size = struct.unpack('!Q', self.live_read(8))[0]
+                if size > 1024 * 1024:
+                    raise ValueError('oversized fixture frame')
+                mask = self.live_read(4)
+                data = bytes(value ^ mask[index % 4] for index, value in enumerate(self.live_read(size)))
+                if opcode == 8:
+                    return
+                if opcode == 9:
+                    self.live_frame(10, data)
+                    continue
+                if opcode == 2:
+                    if not data or len(data) % 2:
+                        raise ValueError('invalid PCM frame')
+                    audio_bytes += len(data)
+                    if stage == 0:
+                        self.live_result(first, False, detected, fragmented=True)
+                        stage = 1
+                        self.state.record(dict(kind='dictation-live', stage='interim', language=selected, audio_bytes=audio_bytes))
+                    elif stage == 1 and advance.is_set():
+                        self.live_result(revised, False, detected)
+                        stage = 2
+                        self.state.record(dict(kind='dictation-live', stage='revised', language=selected, audio_bytes=audio_bytes))
+                elif opcode == 1 and json.loads(data) == {'type': 'CloseStream'}:
+                    if stage != 2:
+                        raise ValueError('stopped before both interim results')
+                    self.state.record(dict(kind='dictation-live', stage='stop', language=selected, audio_bytes=audio_bytes))
+                    self.live_result(final, True, detected)
+                    self.live_result(final, True, detected)
+                    self.live_frame(1, b'{"type":"Metadata"}')
+                    self.state.record(dict(kind='dictation-live', stage='final', language=selected, audio_bytes=audio_bytes))
+                    self.live_frame(8, struct.pack('!H', 1000))
+                    return
+                else:
+                    raise ValueError('unexpected fixture frame')
+        except (ConnectionError, OSError, ValueError) as error:
+            self.state.record(dict(kind='dictation-live', stage='error', error=type(error).__name__))
