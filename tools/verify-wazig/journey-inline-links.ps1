@@ -235,6 +235,7 @@ foreach ($case in $cases) {
         Assert-That ($out.from_me -and $out.quote_fragments.Count -gt 0) 'Outgoing compact quote missing'
         $point = Center-Inline $out.quote_fragments[0].rect
         Record-InlineStage $session (Invoke-InlineClick $session $point[0] $point[1] 'quote-outgoing' $quoteUrl)
+        [InlineLinksNative]::Press(0x22)
         $null = Wait-Until {
             $row = @((Read-Control $session messages).messages | Where-Object id -CEQ 'INLINE-BLOCK')[0]
             $painted = $row -and @($row.quote_fragments).Count -ge 2
@@ -269,6 +270,7 @@ foreach ($case in $cases) {
         [Windows.Forms.Clipboard]::SetText('clipboard negative control')
         Invoke-PaletteCommand $session 'Copy message link'
         $null = Wait-Until { try { [Windows.Forms.Clipboard]::GetText() -ceq $bodyUrl } catch { $false } } 'palette copies the message link'
+        [InlineLinksNative]::Press(0x21)
         $null = Wait-Until {
             $row = @((Read-Control $session messages).messages | Where-Object id -CEQ 'INLINE-REPLY')[0]
             $painted = $row -and @($row.quote_fragments).Count -gt 0

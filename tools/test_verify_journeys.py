@@ -782,9 +782,13 @@ class InlineLinksChecksTests(unittest.TestCase):
                            ("'fixture reply painted again'", '0x21')):
             with self.subTest(step=label):
                 wait = text.index(label)
-                block = text[text.rindex('Wait-Until {', 0, wait):wait]
+                start = text.rindex('Wait-Until {', 0, wait)
+                block = text[start:wait]
                 press = block.index(f'[InlineLinksNative]::Press({key})')
                 self.assertIn('Focus-InlineApp $session', block[:press])
+                before_wait = text[:start].rsplit('\n', 2)
+                self.assertTrue(any(f'[InlineLinksNative]::Press({key})' in line for line in before_wait),
+                                f'{label} must press before it waits')
 
     def test_a_launched_url_releases_the_foreground_before_the_next_step(self):
         journey = (ROOT / 'tools/verify-wazig/journey-inline-links.ps1').read_text()
