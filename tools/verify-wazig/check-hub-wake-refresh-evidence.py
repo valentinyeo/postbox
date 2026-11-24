@@ -27,7 +27,7 @@ def check_hub_wake_refresh(folder):
     assert any(row['path'] == '/fixture/stale-row' and row['status'] == 200 for row in requests)
     assert any(row['path'] == '/fixture/drop-events' and row['status'] == 200 for row in requests)
     assert any(row['path'] == '/fixture/restore-events' and row['status'] == 200 for row in requests)
-    assert any(row['path'] == '/v1/events' and row['status'] == 503 for row in requests)
+    assert any(row.get('path') == '/v1/events' and row.get('status') == 503 for row in requests)
     live_events = [row for row in requests if row.get('path') == '/v1/events' and row.get('id') == '2']
     assert not live_events
     SYNC_LINE['check_hub_sync_line'](folder)

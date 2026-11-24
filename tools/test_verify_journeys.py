@@ -406,6 +406,7 @@ class HubWakeRefreshEvidenceTests(unittest.TestCase):
                                                   'hub-wake-refresh retry-backoff PASS\nhub-wake-refresh sync-line PASS\n')
         rows = [{'path': path, 'status': 200} for path in ('/fixture/mute-sse', '/fixture/stale-row', '/fixture/drop-events', '/fixture/restore-events')]
         rows.append({'path': '/v1/events', 'status': 503})
+        rows.append({'method': 'SSE', 'path': '/v1/events', 'id': 1, 'kind': 'reset'})
         (self.folder / 'bridge-requests.jsonl').write_text('\n'.join(json.dumps(row) for row in rows))
 
     def screen(self, name, dark):
