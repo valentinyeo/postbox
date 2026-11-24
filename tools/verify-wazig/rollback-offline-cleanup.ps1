@@ -3,6 +3,7 @@ $offlineDir = Join-Path $session.root 'offline'
 $copy = Join-Path $offlineDir 'Messages.exe'
 $probeScript = Join-Path $offlineDir 'probe.ps1'
 $probeResult = Join-Path $offlineDir 'probe.json'
+$probeStage = Join-Path $offlineDir 'probe.stage'
 $probeRelease = Join-Path $offlineDir 'release'
 $control = Join-Path $cache 'rollback-aged-control.msg'
 $userName = 'pb' + [Guid]::NewGuid().ToString('N').Substring(0, 12)
@@ -56,6 +57,7 @@ $ErrorActionPreference = 'Stop'
 $sid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
 if (Test-Path 'HKCU:\Software\Messages') { throw 'Disposable app registry is not fresh' }
 if (Get-ChildItem Env: | Where-Object { $_.Name -match '^(WAZIG|WA_BRIDGE|GITHUB|GH_|DEEPGRAM|OPENROUTER|AZURE|AWS)' }) { throw 'Unexpected service credentials' }
+Set-Content $env:PROBE_STAGE 'started'
 $private = Join-Path $env:LOCALAPPDATA 'Messages\unified-journal-v2'
 $files = @(Get-ChildItem $private -Recurse -File)
 if (-not $files.Count) { throw 'No private files to probe' }
@@ -64,6 +66,7 @@ foreach ($file in $files) {
     $stream = [IO.File]::Open($file.FullName, 'Open', 'ReadWrite', 'ReadWrite')
     try { if ($stream.Length -gt 0) { $null = $stream.ReadByte() } } finally { $stream.Dispose() }
 }
+Set-Content $env:PROBE_STAGE 'files-opened'
 foreach ($folder in $folders) {
     $path = Join-Path $folder ('acl-probe-' + [Guid]::NewGuid().ToString('N'))
     [IO.File]::WriteAllText($path, 'read-write-delete')
@@ -72,7 +75,8 @@ foreach ($folder in $folders) {
     if (Test-Path $path) { throw 'Private probe delete failed' }
 }
 @{ sid = $sid; files_opened_readwrite = $files.Count; directories_read_write_delete = $folders.Count; registry_absent = $true } | ConvertTo-Json | Set-Content $env:PROBE_RESULT
-$deadline = [DateTime]::UtcNow.AddSeconds(60)
+Set-Content $env:PROBE_STAGE 'result-written'
+$deadline = [DateTime]::UtcNow.AddSeconds(300)
 while (-not (Test-Path $env:PROBE_RELEASE)) {
     if ([DateTime]::UtcNow -gt $deadline) { throw 'Probe release timed out' }
     Start-Sleep -Milliseconds 100
@@ -95,12 +99,22 @@ while (-not (Test-Path $env:PROBE_RELEASE)) {
     $base.Environment['TEMP'] = $offlineDir
     $base.Environment['TMP'] = $offlineDir
     $base.Environment['PROBE_RESULT'] = $probeResult
+    $base.Environment['PROBE_STAGE'] = $probeStage
     $base.Environment['PROBE_RELEASE'] = $probeRelease
     $base.FileName = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
     foreach ($arg in @('-NoProfile', '-NonInteractive', '-File', $probeScript)) { $base.ArgumentList.Add($arg) }
     $probe = [Diagnostics.Process]::Start($base)
     $probeTicks = $probe.StartTime.ToUniversalTime().Ticks.ToString()
-    $null = Wait-Until { $probe.Refresh(); if ($probe.HasExited) { throw "Disposable ACL probe exited: $($probe.ExitCode)" }; Test-Path $probeResult } 'disposable ACL probe' -Seconds 60
+    $null = Wait-Until {
+        $probe.Refresh()
+        if ($probe.HasExited) { throw "Disposable ACL probe exited: $($probe.ExitCode)" }
+        Test-Path $probeResult
+    } 'disposable ACL probe' -Seconds 180 -Observed {
+        $probe.Refresh()
+        $probe_state = if ($probe.HasExited) { "exited $($probe.ExitCode)" } else { 'running' }
+        $stage = if (Test-Path $probeStage) { (Get-Content $probeStage -Raw).Trim() } else { 'not started' }
+        "probe=$probe_state; stage=$stage; offline=$offlineDir"
+    }
     Assert-That ((Process-Sid $probe.Id) -ceq $sid) 'ACL probe ran as another user'
     $createdProfiles = @(Get-CimInstance Win32_UserProfile | Where-Object SID -CEQ $sid)
     Assert-That ($createdProfiles.Count -eq 1 -and $createdProfiles[0].Loaded -and [IO.Path]::GetFileName($createdProfiles[0].LocalPath).StartsWith($userName, [StringComparison]::OrdinalIgnoreCase) -and $createdProfiles[0].LocalPath.StartsWith(($env:SystemDrive + '\Users\'), [StringComparison]::OrdinalIgnoreCase)) 'Disposable profile identity differs'

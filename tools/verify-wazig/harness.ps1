@@ -57,11 +57,13 @@ function Get-AttachmentPicker($Session) {
     return $null
 }
 
-function Assert-That($Condition, [string]$Message, [switch]$Harness, [string]$CheckName = $Message) {
+function Assert-That($Condition, [string]$Message, [switch]$Harness, [switch]$AppExited, [string]$CheckName = $Message) {
     if ($Condition) { return }
     $failure = [Exception]::new($Message)
     if ($script:JourneyCheckSession -and -not $Harness) {
-        try { $null = Get-App $script:JourneyCheckSession } catch { throw [Exception]::new("$Message; app lookup failed: $($_.Exception.Message)") }
+        if (-not $AppExited) {
+            try { $null = Get-App $script:JourneyCheckSession } catch { throw [Exception]::new("$Message; app lookup failed: $($_.Exception.Message)") }
+        }
         $script:JourneyCheckFailure = $failure
         "$($script:JourneyCheckSession.feature): $CheckName" | Set-Content -LiteralPath (Join-Path $script:JourneyCheckSession.evidence 'journey-check-failed.txt')
     }
