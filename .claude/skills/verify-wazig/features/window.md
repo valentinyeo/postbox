@@ -9,9 +9,9 @@
 
 ## How to get to it (user POV)
 
-- Start Messages, including after installation: the main window opens maximized.
+- Start Postbox, including after installation: the main window opens maximized.
 - Restore and resize through the window system menu, then close with Alt+F4.
-- Reopen Messages or let an update relaunch it: it opens maximized again on its saved monitor. Restore retains the normal size.
+- Reopen Postbox or let an update relaunch it: it opens maximized again on its saved monitor. Restore retains the normal size.
 
 ## Driving it with PowerShell UI Automation
 
