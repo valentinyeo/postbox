@@ -210,7 +210,9 @@ function Get-App($Session) {
         after_exit = checked[checked.index("Assert-That ($closeIndex -ge 0) 'The close request was not logged' -AppExited"):]
         for line in after_exit[:4]:
             self.assertIn('-AppExited', line)
-        self.assertIn("-AppExited", (TOOLS / 'harness.ps1').read_text().split('function Assert-That(', 1)[1].split('\n}', 1)[0])
+        helper = (TOOLS / 'harness.ps1').read_text().split('function Assert-That(', 1)[1].split('\n}', 1)[0]
+        self.assertIn('[switch]$AppExited', helper)
+        self.assertIn('if (-not $AppExited)', helper)
 
 
 class SidebarPlantedTests(unittest.TestCase):
