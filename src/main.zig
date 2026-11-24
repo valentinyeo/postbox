@@ -806,6 +806,7 @@ const App = struct {
     hub_reconnect_failures: std.atomic.Value(u32) = .init(0),
     hub_live: std.atomic.Value(bool) = .init(false),
     sync_state: sync_line.State = .catching_up,
+    sync_down_ms: ?u64 = null,
     sync_clock: Utf8Text(5) = .{},
     sync_text: Utf8Text(sync_line.label_capacity) = .{},
     sync_label: WideText(sync_line.label_capacity) = .{},
@@ -3051,16 +3052,28 @@ fn finishNotificationGapIfReady(a: *App) void {
     appendLaunchLog(a, std.fmt.bufPrint(&log_buffer, "notification: gap summary {s} {s}", .{ if (accepted) @as([]const u8, "shown") else "failed", text }) catch "notification: gap summary");
 }
 
+fn invalidateSyncLine(a: *App) void {
+    const canvas = a.canvas orelse return;
+    var client: win.RECT = undefined;
+    if (win.GetClientRect(canvas, &client) == 0) return;
+    const pill_right = if (a.header_pill_rect.right > a.header_pill_rect.left) a.header_pill_rect.right else 0;
+    const scaled = sync_line.labelRect(.{ .left = client.left, .top = client.top, .right = client.right, .bottom = client.bottom }, pill_right, @intCast(a.dpi)) orelse return;
+    var rect = win.RECT{ .left = scaled.left, .top = scaled.top, .right = scaled.right, .bottom = scaled.bottom };
+    _ = win.InvalidateRect(canvas, &rect, win.FALSE);
+}
+
 fn updateSyncLine(a: *App) void {
     const live = !hubConfigured(a) or a.hub_live.load(.acquire);
-    const state = sync_line.classify(live, a.hub_reconnect_failures.load(.acquire), a.last_inbox_fetch_ms, win.GetTickCount64());
+    const stepped = sync_line.step(.{ .shown = a.sync_state, .down_ms = a.sync_down_ms }, live, a.hub_reconnect_failures.load(.acquire), a.last_inbox_fetch_ms, win.GetTickCount64());
+    a.sync_down_ms = stepped.display.down_ms;
+    const state = stepped.display.shown;
     var buffer: [sync_line.label_capacity + 1]u8 = undefined;
     const text = sync_line.label(&buffer, state, a.sync_clock.slice());
-    if (state == a.sync_state and std.mem.eql(u8, text, a.sync_text.slice())) return;
+    if (!stepped.state_changed and std.mem.eql(u8, text, a.sync_text.slice())) return;
     a.sync_state = state;
     a.sync_text.set(text);
     a.sync_label.set(a.allocator, text);
-    if (a.canvas) |canvas| _ = win.InvalidateRect(canvas, null, win.FALSE);
+    invalidateSyncLine(a);
 }
 
 fn observeNotificationChats(a: *App, rows: []const std.json.Value) void {
