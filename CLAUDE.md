@@ -47,3 +47,4 @@
 | New Actions run logs carry no private markers | `run-log-markers.yml` hourly, `tools/check_private_markers.py --logs` |
 | The video tool installs through one retrying script that fails when ffmpeg is missing (SOFT-2677) | `tools/test_install_ffmpeg.py` and `tools/verify-wazig/install-ffmpeg.ps1` |
 | A file under `.github/` or `tools/` calls a hosted model API only when `.github/ladder-call-allow` lists that path with a reason and an unexpired date | `tools/check-ladder-calls.py` and `tools/test-check-ladder-calls.sh` |
+| The same allow list also satisfies the shared scan from token-ladder, which runs on every PR | `valentinyeo/token-ladder/.github/actions/lint-direct-model-calls@main` in the `ci` job of `.github/workflows/ci.yml` |

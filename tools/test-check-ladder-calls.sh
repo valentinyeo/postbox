@@ -6,7 +6,13 @@ temp=$(mktemp -d)
 trap 'rm -rf -- "$temp"' EXIT
 
 "${check[@]}" "$repo"
-grep -qx 'tools/verify-wazig/verifier.py:verifier needs a model family other than the DeepSeek authors; Token Ladder serves only DeepSeek:2026-12-31' "$repo/.github/ladder-call-allow"
+for allowed in tools/check-ladder-calls.py tools/test-check-ladder-calls.sh tools/test_voice_language.py \
+               tools/verify-wazig/check-voice-language.py tools/verify-wazig/verifier.py; do
+    if ! awk -F: -v path="$allowed" '$1 == path && $2 != "" && $3 ~ /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]$/ { found = 1 } END { exit !found }' "$repo/.github/ladder-call-allow"; then
+        printf 'test-check-ladder-calls: %s needs an allow line with a reason and a date\n' "$allowed" >&2
+        exit 1
+    fi
+done
 python3 - "$repo" <<'PY'
 import re
 import sys

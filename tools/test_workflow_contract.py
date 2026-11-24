@@ -87,9 +87,32 @@ def check_release(auto, release):
     assert release['concurrency']['cancel-in-progress'] is True
 
 
+def check_ladder_scan(workflow):
+    uses = [step.get('uses') for step in workflow['jobs']['ci']['steps']]
+    scan = 'valentinyeo/token-ladder/.github/actions/lint-direct-model-calls@main'
+    assert scan in uses
+    assert uses.index(scan) > uses.index('actions/checkout@v4')
+
+
 class WorkflowContractTests(unittest.TestCase):
     def test_report_workflows(self):
         check_reports({name: load(name) for name in REPORTS})
+
+    def test_ci_runs_the_shared_direct_model_call_scan_after_checkout(self):
+        check_ladder_scan(load('ci'))
+        for mutation in ('missing', 'before-checkout'):
+            with self.subTest(mutation=mutation):
+                workflow = copy.deepcopy(load('ci'))
+                steps = workflow['jobs']['ci']['steps']
+                scan = next(step for step in steps
+                            if step.get('uses') == 'valentinyeo/token-ladder/.github/actions/lint-direct-model-calls@main')
+                if mutation == 'missing':
+                    steps.remove(scan)
+                else:
+                    steps.remove(scan)
+                    steps.insert(0, scan)
+                with self.assertRaises(AssertionError):
+                    check_ladder_scan(workflow)
 
     def test_report_trigger_and_permissions_mutations_fail(self):
         for name in REPORTS:
