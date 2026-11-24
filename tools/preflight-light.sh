@@ -23,6 +23,7 @@ PYTHON_LIGHT_TESTS=(
     test_no_comments
     test_no_stories
     test_palette_archived
+    test_pc_check
     test_pin_icon
     test_postbox
     test_preexisting_journey
@@ -47,6 +48,7 @@ PYTHON_LIGHT_TESTS=(
     test_verdict
     test_vw
     test_job_budget
+    test_judge_eval
     test_revert_first
     test_verification_job_counts
     test_verify_failure_marker

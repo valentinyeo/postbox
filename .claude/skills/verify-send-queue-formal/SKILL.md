@@ -1,5 +1,5 @@
 ---
-name: verify-send-queue
+name: verify-send-queue-formal
 description: Formally check the Postbox send queue and voice-note transcription retry with TLA+ models. Use when changing the unified outbox, send retry, restart recovery, or transcription attempts, and when /maintain-formal-verification-skill asks whether the models still match the code.
 ---
 

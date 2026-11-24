@@ -275,7 +275,7 @@ class JourneyPlanningTests(unittest.TestCase):
             (['src/audio.zig', 'src/reply.zig'], {'search', 'voice', 'reply'}),
             (['src/media.zig', 'src/slack.zig'], {'search', 'voice', 'reply', 'media-fit', 'slack-threads'}),
             (['src/paste_image.zig', 'tools/verify-wazig/caret.ps1'], {'search', 'voice', 'reply', 'paste-image', 'caret'}),
-            (['src/theme.zig', 'src/dictation.zig'], {'search', 'voice', 'reply', 'sidebar-surface', 'dictation-shortcuts'}),
+            (['src/theme.zig', 'src/dictation.zig'], {'search', 'voice', 'reply', 'sidebar-surface', 'dictation-shortcuts', 'dictation-live'}),
         ]
         for files, expected in cases:
             with self.subTest(files=files):

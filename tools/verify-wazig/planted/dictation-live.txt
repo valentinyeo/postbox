@@ -1,0 +1,1 @@
+Interim words never reach the composer while dictation is recording, so the draft appears only after the recording stops.

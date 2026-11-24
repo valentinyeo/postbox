@@ -274,6 +274,13 @@
       "why": ""
     },
     {
+      "feature": "hub-inbox-refresh",
+      "source": "main:hubSafetyRefreshIfDue",
+      "proof": "hub-wake-refresh",
+      "status": "covered",
+      "why": ""
+    },
+    {
       "feature": "command_replies_slack",
       "source": "buildPaletteItems:command_replies_slack",
       "proof": "reply",
@@ -589,6 +596,13 @@
       "why": ""
     },
     {
+      "feature": "dictation-live",
+      "source": "src:dictation-live",
+      "proof": "dictation-live",
+      "status": "covered",
+      "why": ""
+    },
+    {
       "feature": "gif-picker",
       "source": "src:gif-picker",
       "proof": "gif-picker",
@@ -621,7 +635,7 @@
       "source": "src:update-card",
       "proof": "quiet-status",
       "status": "covered",
-      "why": ""
+      "why": "Card visibility is covered by quiet-status. postbox-upgrade.ps1 checks the newest offer with the GitHub API limit exhausted; tools/test_update_cards.py exercises release-file publishing through the real CLI."
     },
     {
       "feature": "atomic-update",
@@ -750,6 +764,13 @@
       "why": ""
     },
     {
+      "feature": "deep-links",
+      "source": "src/deep_link.zig",
+      "proof": "deep-links",
+      "status": "covered",
+      "why": ""
+    },
+    {
       "feature": "ctrl-shortcut-badges",
       "source": "tools/verify-wazig/check-ctrl-badges-evidence.py",
       "proof": "ctrl-badges",
@@ -809,6 +830,13 @@
       "feature": "hub-crash-recovery",
       "source": "tools/verify-wazig/check-hub-migration-crash-evidence.py",
       "proof": "hub-migration-crash",
+      "status": "covered",
+      "why": ""
+    },
+    {
+      "feature": "exit_record",
+      "source": "reportPreviousExit",
+      "proof": "exit-record",
       "status": "covered",
       "why": ""
     }

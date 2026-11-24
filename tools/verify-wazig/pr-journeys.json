@@ -16,7 +16,8 @@
       "reply"
     ],
     "src/dictation": [
-      "dictation-shortcuts"
+      "dictation-shortcuts",
+      "dictation-live"
     ],
     "src/paste_image": [
       "paste-image"
@@ -38,6 +39,13 @@
     ],
     "src/signal": [
       "signal"
+    ],
+    "src/sync_gate.zig": [
+      "hub-wake-refresh"
+    ],
+    "tools/verify-wazig/fake-wa-bridge.py": [
+      "hub-wake-refresh",
+      "whatsapp-hub"
     ],
     "src/media": [
       "media-fit"
@@ -71,6 +79,9 @@
     ],
     "tools/verify-wazig/check-hub-fault-evidence.py": [
       "hub-fault"
+    ],
+    "tools/verify-wazig/check-hub-wake-refresh-evidence.py": [
+      "hub-wake-refresh"
     ],
     "tools/verify-wazig/check-hub-rollback-evidence.py": [
       "hub-rollback"
@@ -339,6 +350,9 @@
     "tools/verify-wazig/journey-voice.ps1": [
       "voice"
     ],
+    "tools/verify-wazig/journey-hub-wake-refresh.ps1": [
+      "hub-wake-refresh"
+    ],
     "tools/verify-wazig/journey-whatsapp-hub.ps1": [
       "whatsapp-hub"
     ],
@@ -361,7 +375,8 @@
       "palette-archived"
     ],
     "tools/verify-wazig/prepare-dictation.ps1": [
-      "dictation-shortcuts"
+      "dictation-shortcuts",
+      "dictation-live"
     ],
     "tools/verify-wazig/prepare-drafts.ps1": [
       "drafts"
@@ -386,6 +401,9 @@
     ],
     "tools/verify-wazig/prepare-voice.ps1": [
       "voice"
+    ],
+    "tools/verify-wazig/prepare-hub-wake-refresh.ps1": [
+      "hub-wake-refresh"
     ],
     "tools/verify-wazig/prepare-whatsapp-hub.ps1": [
       "whatsapp-hub"
@@ -422,6 +440,34 @@
     ],
     "tools/verify-wazig/evidence-real-size.py": [
       "real-size"
+    ],
+    "src/deep_link": [
+      "deep-links"
+    ],
+    "tools/verify-wazig/journey-deep-links.ps1": [
+      "deep-links"
+    ],
+    "tools/verify-wazig/deep-links-fixture.py": [
+      "deep-links"
+    ],
+    "tools/verify-wazig/check-deep-links-evidence.py": [
+      "deep-links"
+    ],
+    "tools/verify-wazig/journey-dictation-live.ps1": [
+      "dictation-live"
+    ],
+    "tools/verify-wazig/check-dictation-live-evidence.py": [
+      "dictation-live"
+    ],
+    "tools/verify-wazig/dictation-fixture.py": [
+      "dictation-shortcuts",
+      "dictation-live"
+    ],
+    "src/exit_record": [
+      "exit-record"
+    ],
+    "tools/verify-wazig/journey-exit-record": [
+      "exit-record"
     ]
   }
 }

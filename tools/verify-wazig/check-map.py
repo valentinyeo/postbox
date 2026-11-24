@@ -309,14 +309,19 @@ assert '[VerifyMenus]::Click' in reaction_journey and "'#32768'" in reaction_jou
 print('REACTIONS MAP VERIFIED: real mouse journey, exact hub emoji evidence and PR matrix')
 
 threads = (root / 'tools/verify-wazig/slack-threads.ps1').read_text(encoding='utf-8')
-for artifact in ['threads-on', 'thread-panel', 'thread-reply', 'threads-off', 'threads-restart', 'chat-whatsapp-style', 'chat-slack-style', 'restart.json']:
+for artifact in ['threads-on', 'thread-panel', 'thread-reply', 'threads-off', 'threads-restart', 'chat-whatsapp-style', 'chat-slack-style', 'fresh-slack-default', 'whatsapp-default', 'restart.json']:
     assert artifact in threads, artifact
 assert 'slack-threads' in options and entries['slack-threads']['evidence']
 assert entries['slack-threads']['validator']['file'] == 'check-slack-threads-evidence.py'
+assert entries['slack-threads']['chats'] == 3 and entries['slack-threads']['prepare'] == 'prepare-slack-threads.ps1'
+assert entries['slack-threads']['hub_handler']['class'] == 'SlackThreadsDefaultHandler'
 assert 'slack_threads.parent_reply_line' in threads and 'WAZIG_VERIFY_RESTART' in threads
-assert '.replies_style' in threads
+assert '.replies_style' in threads and 'fixture-fresh' in threads and 'fixture-whatsapp' in threads
+fixture = (root / 'tools/verify-wazig/fake-hub.py').read_text(encoding='utf-8')
+assert 'class SlackThreadsDefaultHandler(SlackThreadsHandler)' in fixture
+assert "dict(jid=FRESH_CHAT" in fixture and "dict(jid=WHATSAPP_CHAT" in fixture
 assert 'slack-threads' in {row['hub'] for row in journeys}
-print('SLACK THREADS MAP VERIFIED: synthetic hub, keyboard journey, read-only measurements and restart')
+print('SLACK THREADS MAP VERIFIED: synthetic hub, keyboard journey, read-only measurements, restart and default reply style')
 
 broadcast = (root / 'tools/verify-wazig/slack-thread-broadcast.ps1').read_text(encoding='utf-8')
 for artifact in ['broadcast-unticked', 'broadcast-ticked', 'broadcast-reset', 'broadcast-thread-result', 'broadcast-chat-result', 'broadcast-messages.json']:
