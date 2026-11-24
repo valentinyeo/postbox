@@ -1,0 +1,22 @@
+diff --git a/src/main.zig b/src/main.zig
+index 6935bc8..b6ec0f0 100644
+--- a/src/main.zig
++++ b/src/main.zig
+@@ -11916,6 +11916,8 @@ fn toggleDictation(a: *App) void {
+     }
+ }
+ 
++const live_updates_enabled = false;
++
+ fn updateLiveDictation(a: *App, session: *dictation.Session) void {
+     const operation = if (a.dictation_operation) |*value| value else return;
+     if (operation.live_detached or std.meta.activeTag(operation.intent) != .insert_only or !sameDictationContext(a, &operation.context)) return;
+@@ -11982,7 +11984,7 @@ fn updateDictation(a: *App) void {
+     const session = a.dictation_session orelse return;
+     observeDictationContext(a);
+     const state = session.state();
+-    if (state == .recording) updateLiveDictation(a, session);
++    if (state == .recording and live_updates_enabled) updateLiveDictation(a, session);
+     if (state == .ready) {
+         if (!session.fixtureConsumeReady()) return;
+         var transcript_buffer: [8192]u8 = undefined;

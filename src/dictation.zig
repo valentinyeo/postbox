@@ -4,6 +4,7 @@ const chat_key = @import("chat_key.zig");
 const mic_choice = @import("mic_choice.zig");
 const format_request = @import("format_request.zig");
 const dictation_policy = @import("dictation_policy.zig");
+const live = @import("dictation_live.zig");
 const slack_win = @import("winhttp.zig");
 const win = @cImport({
     @cDefine("WIN32_LEAN_AND_MEAN", "1");
@@ -32,6 +33,9 @@ pub const Session = struct {
     state_value: std.atomic.Value(u8) = .init(@intFromEnum(SessionState.idle)),
     result: [8192]u8 = [_]u8{0} ** 8192,
     result_len: usize = 0,
+    result_mutex: std.atomic.Mutex = .unlocked,
+    live_revision: u64 = 0,
+    live_fixture_port: ?u16 = null,
     origin: drafts.Identity = .{},
     elapsed_ms: std.atomic.Value(u64) = .init(0),
     meter_level: std.atomic.Value(u8) = .init(0),
@@ -137,6 +141,7 @@ pub const Session = struct {
         const key = self.allocator.dupe(u8, api_key) catch return false;
         self.origin = drafts.Identity.init(origin);
         self.result_len = 0;
+        self.live_revision = 0;
         self.elapsed_ms.store(0, .release);
         self.meter_level.store(0, .release);
         self.stop_requested.store(false, .release);
@@ -148,6 +153,10 @@ pub const Session = struct {
         };
         self.generation +%= 1;
         return true;
+    }
+
+    pub fn isLive(self: *const Session) bool {
+        return self.fixture == null or self.live_fixture_port != null;
     }
 
     pub fn requestStop(self: *Session) void {
@@ -165,6 +174,15 @@ pub const Session = struct {
     pub fn peekTranscript(self: *Session, destination: []u8) ?[]const u8 {
         if (self.state() != .ready or destination.len < self.result_len) return null;
         @memcpy(destination[0..self.result_len], self.result[0..self.result_len]);
+        return destination[0..self.result_len];
+    }
+
+    pub fn peekLiveTranscript(self: *Session, destination: []u8, revision: *u64) ?[]const u8 {
+        while (!self.result_mutex.tryLock()) std.atomic.spinLoopHint();
+        defer self.result_mutex.unlock();
+        if (self.live_revision == revision.* or destination.len < self.result_len) return null;
+        @memcpy(destination[0..self.result_len], self.result[0..self.result_len]);
+        revision.* = self.live_revision;
         return destination[0..self.result_len];
     }
 
@@ -190,7 +208,14 @@ fn createFixtureEvent(allocator: std.mem.Allocator, id: []const u8, suffix: []co
 
 fn workerMain(self: *Session, api_key: []u8, language: Language) void {
     defer self.allocator.free(api_key);
-    const wav = (if (self.fixture) |fixture| captureFixture(self, fixture.pcm) else captureMicrophone(self)) catch {
+    if (self.isLive()) {
+        streamMicrophone(self, api_key, language) catch {
+            _ = self.transition(.recording, .failed);
+            _ = self.transition(.transcribing, .failed);
+        };
+        return;
+    }
+    const wav = captureFixture(self, self.fixture.?.pcm) catch {
         _ = self.transition(.recording, .failed);
         return;
     };
@@ -250,89 +275,160 @@ fn captureFixture(self: *Session, pcm: []const u8) ![]u8 {
     return self.allocator.dupe(u8, pcm);
 }
 
-fn captureMicrophone(self: *Session) ![]u8 {
-    _ = self.microphone_entries.fetchAdd(1, .monotonic);
-    _ = win.CoInitializeEx(null, win.COINIT_MULTITHREADED);
-    defer win.CoUninitialize();
+const LiveReceiver = struct {
+    session: *Session,
+    socket: win.HINTERNET,
+    language: Language,
+    done: std.atomic.Value(bool) = .init(false),
+    failed: bool = false,
 
+    fn run(self: *LiveReceiver) void {
+        self.receive() catch {
+            self.failed = true;
+        };
+        self.done.store(true, .release);
+    }
+
+    fn receive(self: *LiveReceiver) !void {
+        var transcript = live.Transcript{};
+        var message: [64 * 1024]u8 = undefined;
+        var length: usize = 0;
+        while (!self.session.cancelled()) {
+            var count: win.DWORD = 0;
+            var kind: win.WINHTTP_WEB_SOCKET_BUFFER_TYPE = undefined;
+            if (win.WinHttpWebSocketReceive(self.socket, message[length..].ptr, @intCast(message.len - length), &count, &kind) != win.NO_ERROR) return error.NetworkFailed;
+            if (kind == win.WINHTTP_WEB_SOCKET_CLOSE_BUFFER_TYPE) {
+                if (transcript.interim_len > 0 or self.session.state() != .transcribing) return error.IncompleteTranscript;
+                return;
+            }
+            if (kind != win.WINHTTP_WEB_SOCKET_UTF8_FRAGMENT_BUFFER_TYPE and kind != win.WINHTTP_WEB_SOCKET_UTF8_MESSAGE_BUFFER_TYPE) return error.BadResponse;
+            length += count;
+            if (kind == win.WINHTTP_WEB_SOCKET_UTF8_MESSAGE_BUFFER_TYPE) {
+                if (try transcript.receive(self.session.allocator, message[0..length], self.language)) {
+                    var text: [live.capacity]u8 = undefined;
+                    const snapshot = try transcript.copy(&text);
+                    while (!self.session.result_mutex.tryLock()) std.atomic.spinLoopHint();
+                    if (!std.mem.eql(u8, snapshot, self.session.result[0..self.session.result_len])) {
+                        @memcpy(self.session.result[0..snapshot.len], snapshot);
+                        self.session.result_len = snapshot.len;
+                        self.session.live_revision +%= 1;
+                    }
+                    self.session.result_mutex.unlock();
+                }
+                length = 0;
+            } else if (length == message.len) return error.BadResponse;
+        }
+    }
+
+    fn send(self: *LiveReceiver, pcm: []const u8) !void {
+        if (self.done.load(.acquire)) return error.NetworkFailed;
+        if (win.WinHttpWebSocketSend(self.socket, win.WINHTTP_WEB_SOCKET_BINARY_MESSAGE_BUFFER_TYPE, @ptrCast(@constCast(pcm.ptr)), @intCast(pcm.len)) != win.NO_ERROR) return error.NetworkFailed;
+    }
+};
+
+fn streamMicrophone(self: *Session, api_key: []const u8, language: Language) !void {
+    if (self.cancelled()) return;
+    const session = win.WinHttpOpen(lit("Postbox/0.3"), win.WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY, null, null, 0) orelse return error.NetworkFailed;
+    defer _ = win.WinHttpCloseHandle(session);
+    _ = win.WinHttpSetTimeouts(session, 10_000, 10_000, 10_000, 10_000);
+    const connection = win.WinHttpConnect(session, if (self.live_fixture_port != null) lit("127.0.0.1") else lit("api.deepgram.com"), self.live_fixture_port orelse win.INTERNET_DEFAULT_HTTPS_PORT, 0) orelse return error.NetworkFailed;
+    defer _ = win.WinHttpCloseHandle(connection);
+    const request_path = switch (language) {
+        .automatic => lit(live.path(.automatic)),
+        .english => lit(live.path(.english)),
+        .german => lit(live.path(.german)),
+    };
+    const request = win.WinHttpOpenRequest(connection, lit("GET"), request_path, null, null, null, if (self.live_fixture_port != null) 0 else win.WINHTTP_FLAG_SECURE) orelse return error.NetworkFailed;
+    defer _ = win.WinHttpCloseHandle(request);
+    if (win.WinHttpSetOption(request, win.WINHTTP_OPTION_UPGRADE_TO_WEB_SOCKET, null, 0) == 0) return error.NetworkFailed;
+    const header = try std.fmt.allocPrint(self.allocator, "Authorization: Token {s}\r\n", .{api_key});
+    defer self.allocator.free(header);
+    const wide_header = try std.unicode.utf8ToUtf16LeAllocZ(self.allocator, header);
+    defer self.allocator.free(wide_header);
+    if (self.cancelled()) return;
+    if (self.live_fixture_port == null) self.noteTranscriptionAttempt();
+    if (win.WinHttpSendRequest(request, wide_header.ptr, @intCast(wide_header.len), null, 0, 0, 0) == 0 or win.WinHttpReceiveResponse(request, null) == 0) return error.NetworkFailed;
+    var status: win.DWORD = 0;
+    var status_size: win.DWORD = @sizeOf(win.DWORD);
+    if (win.WinHttpQueryHeaders(request, win.WINHTTP_QUERY_STATUS_CODE | win.WINHTTP_QUERY_FLAG_NUMBER, null, &status, &status_size, null) == 0 or status != 101) return error.ApiFailed;
+    if (self.cancelled()) return;
+    const socket = win.WinHttpWebSocketCompleteUpgrade(request, 0) orelse return error.NetworkFailed;
+    var receiver = LiveReceiver{ .session = self, .socket = socket, .language = language };
+    const thread = std.Thread.spawn(.{ .stack_size = 1024 * 1024 }, LiveReceiver.run, .{&receiver}) catch |err| {
+        _ = win.WinHttpCloseHandle(socket);
+        return err;
+    };
+    defer {
+        _ = win.WinHttpCloseHandle(socket);
+        thread.join();
+    }
+    if (self.fixture) |fixture| {
+        var offset: usize = 0;
+        while (!self.stop_requested.load(.acquire) and self.elapsedMs() < 10 * 60 * 1000) {
+            const end = @min(fixture.pcm.len, offset + 3200);
+            try receiver.send(fixture.pcm[offset..end]);
+            self.meter_level.store(@import("dictation_meter.zig").level(fixture.pcm[offset..end], 16, false), .release);
+            _ = self.elapsed_ms.fetchAdd(@as(u64, @intCast(end - offset)) * 1000 / 32000, .release);
+            offset = if (end == fixture.pcm.len) 0 else end;
+            win.Sleep(100);
+        }
+    } else try captureMicrophone(self, &receiver);
+    if (!self.transition(.recording, .transcribing)) return;
+    const close_stream: []const u8 = "{\"type\":\"CloseStream\"}";
+    if (win.WinHttpWebSocketSend(socket, win.WINHTTP_WEB_SOCKET_UTF8_MESSAGE_BUFFER_TYPE, @ptrCast(@constCast(close_stream.ptr)), close_stream.len) != win.NO_ERROR) return error.NetworkFailed;
+    if (win.WaitForSingleObject(@ptrCast(thread.getHandle()), 10_000) != win.WAIT_OBJECT_0) return error.FinalTranscriptTimeout;
+    if (!receiver.done.load(.acquire) or receiver.failed) return error.NetworkFailed;
+    if (self.result_len == 0) return error.NoSpeech;
+    _ = self.transition(.transcribing, .ready);
+}
+
+fn captureMicrophone(self: *Session, receiver: *LiveReceiver) !void {
+    _ = self.microphone_entries.fetchAdd(1, .monotonic);
+    const initialized = win.CoInitializeEx(null, win.COINIT_MULTITHREADED);
+    if (initialized < 0) return error.NoMicrophone;
+    defer win.CoUninitialize();
     var enumerator: ?*win.IMMDeviceEnumerator = null;
     if (win.CoCreateInstance(&guid_mmdevice_enumerator, null, win.CLSCTX_ALL, &guid_immdevice_enumerator, @ptrCast(&enumerator)) < 0 or enumerator == null) return error.NoMicrophone;
     defer _ = enumerator.?.*.lpVtbl.*.Release.?(enumerator);
-
     var device: ?*win.IMMDevice = null;
     if (mic_choice.openChosen()) |picked| device = @ptrCast(@alignCast(picked));
     if (device == null and (enumerator.?.*.lpVtbl.*.GetDefaultAudioEndpoint.?(enumerator.?, win.eCapture, win.eCommunications, &device) < 0 or device == null)) return error.NoMicrophone;
     defer _ = device.?.*.lpVtbl.*.Release.?(device);
-
     var client: ?*win.IAudioClient = null;
     if (device.?.*.lpVtbl.*.Activate.?(device.?, &guid_iaudioclient, win.CLSCTX_ALL, null, @ptrCast(&client)) < 0 or client == null) return error.NoMicrophone;
     defer _ = client.?.*.lpVtbl.*.Release.?(client);
-
-    var format: ?*win.WAVEFORMATEX = null;
-    if (client.?.*.lpVtbl.*.GetMixFormat.?(client.?, &format) < 0 or format == null) return error.NoMicrophone;
-    defer win.CoTaskMemFree(format);
-    const wave_format = format.?;
-    if (wave_format.nBlockAlign == 0) return error.UnsupportedFormat;
-
-    if (client.?.*.lpVtbl.*.Initialize.?(client.?, win.AUDCLNT_SHAREMODE_SHARED, 0, 1 * 10_000_000, 0, wave_format, null) < 0) return error.NoMicrophone;
+    var format = win.WAVEFORMATEX{ .wFormatTag = win.WAVE_FORMAT_PCM, .nChannels = 1, .nSamplesPerSec = 16000, .nAvgBytesPerSec = 32000, .nBlockAlign = 2, .wBitsPerSample = 16, .cbSize = 0 };
+    if (client.?.*.lpVtbl.*.Initialize.?(client.?, win.AUDCLNT_SHAREMODE_SHARED, win.AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM | win.AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY, 1 * 10_000_000, 0, &format, null) < 0) return error.NoMicrophone;
     var capture: ?*win.IAudioCaptureClient = null;
     if (client.?.*.lpVtbl.*.GetService.?(client.?, &guid_iaudiocaptureclient, @ptrCast(&capture)) < 0 or capture == null) return error.NoMicrophone;
     defer _ = capture.?.*.lpVtbl.*.Release.?(capture);
-
-    var pcm: std.ArrayList(u8) = .empty;
-    defer pcm.deinit(self.allocator);
     if (client.?.*.lpVtbl.*.Start.?(client.?) < 0) return error.NoMicrophone;
     defer _ = client.?.*.lpVtbl.*.Stop.?(client.?);
-
-    var float_samples = wave_format.wFormatTag == win.WAVE_FORMAT_IEEE_FLOAT;
-    if (wave_format.wFormatTag == 0xFFFE and wave_format.cbSize >= 22) {
-        const format_bytes: [*]const u8 = @ptrCast(wave_format);
-        float_samples = std.mem.readInt(u32, format_bytes[24..28], .little) == 3;
-    }
-    const max_bytes: usize = @as(usize, wave_format.nAvgBytesPerSec) * 10 * 60;
-    while (!self.stop_requested.load(.acquire) and pcm.items.len < max_bytes) {
+    var bytes: u64 = 0;
+    const silence: [32000]u8 = @splat(0);
+    while (!self.stop_requested.load(.acquire) and bytes < 32000 * 10 * 60) {
+        if (receiver.done.load(.acquire)) return error.NetworkFailed;
         var packet_frames: win.UINT32 = 0;
         if (capture.?.*.lpVtbl.*.GetNextPacketSize.?(capture.?, &packet_frames) < 0) return error.CaptureFailed;
         while (packet_frames > 0) {
             var data: [*c]u8 = null;
             var frames: win.UINT32 = 0;
             var flags: win.DWORD = 0;
-            var device_position: win.UINT64 = 0;
-            var qpc_position: win.UINT64 = 0;
-            if (capture.?.*.lpVtbl.*.GetBuffer.?(capture.?, &data, &frames, &flags, &device_position, &qpc_position) < 0) return error.CaptureFailed;
-            const byte_count: usize = @as(usize, frames) * wave_format.nBlockAlign;
-            const before = pcm.items.len;
-            if ((flags & win.AUDCLNT_BUFFERFLAGS_SILENT) != 0) {
-                const old_len = pcm.items.len;
-                try pcm.resize(self.allocator, old_len + byte_count);
-                @memset(pcm.items[old_len..], 0);
-            } else {
-                try pcm.appendSlice(self.allocator, data[0..byte_count]);
+            if (capture.?.*.lpVtbl.*.GetBuffer.?(capture.?, &data, &frames, &flags, null, null) < 0) return error.CaptureFailed;
+            {
+                defer _ = capture.?.*.lpVtbl.*.ReleaseBuffer.?(capture.?, frames);
+                const count: usize = @as(usize, frames) * 2;
+                if (count > silence.len) return error.CaptureFailed;
+                const pcm = if ((flags & win.AUDCLNT_BUFFERFLAGS_SILENT) != 0) silence[0..count] else data[0..count];
+                try receiver.send(pcm);
+                bytes += count;
+                self.meter_level.store(@import("dictation_meter.zig").level(pcm, 16, false), .release);
+                self.elapsed_ms.store(bytes * 1000 / 32000, .release);
             }
-            self.meter_level.store(@import("dictation_meter.zig").level(pcm.items[before..], wave_format.wBitsPerSample, float_samples), .release);
-            if (wave_format.nAvgBytesPerSec > 0) self.elapsed_ms.store(@as(u64, @intCast(pcm.items.len)) * 1000 / wave_format.nAvgBytesPerSec, .release);
-            if (capture.?.*.lpVtbl.*.ReleaseBuffer.?(capture.?, frames) < 0) return error.CaptureFailed;
             if (capture.?.*.lpVtbl.*.GetNextPacketSize.?(capture.?, &packet_frames) < 0) return error.CaptureFailed;
         }
         win.Sleep(10);
     }
-
-    const simple_format = wave_format.wFormatTag == win.WAVE_FORMAT_PCM or wave_format.wFormatTag == win.WAVE_FORMAT_IEEE_FLOAT;
-    const format_size: usize = if (simple_format) 16 else 18 + wave_format.cbSize;
-    const total_size = 12 + 8 + format_size + 8 + pcm.items.len;
-    const wav = try self.allocator.alloc(u8, total_size);
-    @memcpy(wav[0..4], "RIFF");
-    std.mem.writeInt(u32, wav[4..8], @intCast(total_size - 8), .little);
-    @memcpy(wav[8..12], "WAVE");
-    @memcpy(wav[12..16], "fmt ");
-    std.mem.writeInt(u32, wav[16..20], @intCast(format_size), .little);
-    const format_bytes: [*]const u8 = @ptrCast(wave_format);
-    @memcpy(wav[20 .. 20 + format_size], format_bytes[0..format_size]);
-    const data_header = 20 + format_size;
-    @memcpy(wav[data_header .. data_header + 4], "data");
-    std.mem.writeInt(u32, wav[data_header + 4 ..][0..4], @intCast(pcm.items.len), .little);
-    @memcpy(wav[data_header + 8 ..], pcm.items);
-    return wav;
 }
 
 const Transport = struct {

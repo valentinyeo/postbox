@@ -183,15 +183,15 @@ class StatusLineTests(unittest.TestCase):
             with self.subTest(function=name):
                 expected = function(parent, name)
                 added = {
-                    'updateCardNotesHeight': '    if ((a.update_card_error_source == .message_read or a.update_card_error_source == .chats_read) and a.update_card_error_len > 0) return 0;\n',
+                    'updateCardNotesHeight': '    if ((a.update_card_error_source == .message_read or a.update_card_error_source == .chats_read or a.update_card_error_source == .deep_link) and a.update_card_error_len > 0) return 0;\n',
                     'updateCardFail': '    a.update_card_error_source = .update;\n',
                     'updateCardClick': '    if (a.update_card_error_source == .message_read and a.update_card_error_len > 0) {\n        clearMessageReadProblem(a);\n        a.msg_read_attempts = 0;\n        a.msg_read_retry_ticks = 0;\n        refreshMessages(a);\n        return;\n    }\n',
                     'updateCardDismiss': '    if (a.update_card_error_source == .message_read and a.update_card_error_len > 0) {\n        clearMessageReadProblem(a);\n        return;\n    }\n',
                 }.get(name, '')
                 if name == 'updateCardClick':
-                    added = '    if (a.update_card_error_source == .chats_read and a.update_card_error_len > 0) {\n        a.chats_read_attempts = 0;\n        a.chats_read_retry_ticks = 0;\n        refreshChats(a);\n        return;\n    }\n' + added
+                    added = '    if (a.update_card_error_source == .deep_link and a.update_card_error_len > 0) {\n        clearDeepLinkProblem(a);\n        return;\n    }\n    if (a.update_card_error_source == .chats_read and a.update_card_error_len > 0) {\n        a.chats_read_attempts = 0;\n        a.chats_read_retry_ticks = 0;\n        refreshChats(a);\n        return;\n    }\n' + added
                 if name == 'updateCardDismiss':
-                    added = '    if (a.update_card_error_source == .chats_read and a.update_card_error_len > 0) {\n        clearChatsReadProblem(a);\n        return;\n    }\n' + added
+                    added = '    if (a.update_card_error_source == .deep_link and a.update_card_error_len > 0) {\n        clearDeepLinkProblem(a);\n        return;\n    }\n    if (a.update_card_error_source == .chats_read and a.update_card_error_len > 0) {\n        clearChatsReadProblem(a);\n        return;\n    }\n' + added
                 expected = expected.replace('{\n', '{\n' + added, 1)
                 if name == 'updateCardClick':
                     expected = expected.replace('    a.update_card_error_len = 0;\n', '    a.update_card_error_len = 0;\n    a.update_card_error_source = .update;\n', 1)
@@ -211,9 +211,9 @@ class StatusLineTests(unittest.TestCase):
         painter = painter.replace('pending.tag', 'pending_tag').replace('pending.notes', 'pending_notes')
         painter = painter.replace('|pending| pending_tag', '|pending| pending.tag').replace('|pending| pending_notes', '|pending| pending.notes')
         painter = painter.replace('    const pending_notes = if (a.update_pending)',
-                                  '    const pending_notes = if ((a.update_card_error_source == .message_read or a.update_card_error_source == .chats_read) and a.update_card_error_len > 0) "" else if (a.update_pending)')
+                                  '    const pending_notes = if ((a.update_card_error_source == .message_read or a.update_card_error_source == .chats_read or a.update_card_error_source == .deep_link) and a.update_card_error_len > 0) "" else if (a.update_pending)')
         painter = painter.replace('    else if (failed)\n        "Update failed"',
-                                  '    else if (failed and a.update_card_error_source == .chats_read)\n        "Chats unavailable"\n    else if (failed and a.update_card_error_source == .message_read)\n        "Messages unavailable"\n    else if (failed)\n        "Update failed"')
+                                  '    else if (failed and a.update_card_error_source == .chats_read)\n        "Chats unavailable"\n    else if (failed and a.update_card_error_source == .message_read)\n        "Messages unavailable"\n    else if (failed and a.update_card_error_source == .deep_link)\n        "Chat not found"\n    else if (failed)\n        "Update failed"')
         painter = painter.replace('    var title_buf: [64]u8 = undefined;\n', '')
         painter = painter.replace('    else\n        std.fmt.bufPrint(&title_buf, "Postbox v{s}", .{tag}) catch "Postbox update available";',
                                   '    else\n        "Update ready";')
@@ -221,9 +221,10 @@ class StatusLineTests(unittest.TestCase):
                                   '    else if (a.update_staged)\n        std.fmt.bufPrint(&line_buf, "v{s} - takes a few seconds", .{tag}) catch "Takes a few seconds"\n    else\n        std.fmt.bufPrint(&line_buf, "v{s} - downloading in the background", .{tag}) catch "Downloading in the background";')
         painter = painter.replace('    if (busy) {\n        const bar = updateCardWinRect(card_layout.bar);\n        var track = bar;\n        if (win.CreateSolidBrush(theme.current.secondary_container)) |brush| {\n            _ = win.FillRect(hdc, &track, brush);\n            _ = win.DeleteObject(brush);\n        }\n        var fill = bar;\n        fill.right = bar.left + @divTrunc((bar.right - bar.left) * @as(i32, @intCast(pct)), 100);\n        if (win.CreateSolidBrush(theme.current.primary)) |brush| {\n            _ = win.FillRect(hdc, &fill, brush);\n            _ = win.DeleteObject(brush);\n        }\n        return;\n    }\n',
                                   '    if (busy) return;\n')
-        painter = painter.replace('    var close_rc = updateCardCloseRect(a, card);\n    _ = win.SetTextColor(hdc, theme.current.on_surface_variant);\n    drawAscii(hdc, &close_rc, "x",',
-                                  '    var close_rc = updateCardCloseRect(a, card);\n    _ = win.SelectObject(hdc, @ptrCast(a.font_small.?));\n    _ = win.SetTextColor(hdc, theme.current.on_surface_variant);\n    drawAscii(hdc, &close_rc, "Later",')
-        painter = painter.replace('utf8ToUtf16LeStringLiteral("Update now")', 'utf8ToUtf16LeStringLiteral("Restart")')
+        painter = painter.replace('    var close_rc = updateCardCloseRect(a, card);\n    _ = win.SetTextColor(hdc, theme.current.on_surface_variant);\n    drawAscii(hdc, &close_rc, "x", win.DT_SINGLELINE | win.DT_VCENTER | win.DT_CENTER | win.DT_NOPREFIX);',
+                                  '    if (a.update_card_error_source != .deep_link) {\n        var close_rc = updateCardCloseRect(a, card);\n        _ = win.SelectObject(hdc, @ptrCast(a.font_small.?));\n        _ = win.SetTextColor(hdc, theme.current.on_surface_variant);\n        drawAscii(hdc, &close_rc, "Later", win.DT_SINGLELINE | win.DT_VCENTER | win.DT_CENTER | win.DT_NOPREFIX);\n    }')
+        painter = painter.replace('    const label: []const u16 = if (failed) std.unicode.utf8ToUtf16LeStringLiteral("Retry") else std.unicode.utf8ToUtf16LeStringLiteral("Update now");',
+                                  '    const label: []const u16 = if (failed and a.update_card_error_source == .deep_link)\n        std.unicode.utf8ToUtf16LeStringLiteral("Dismiss")\n    else if (failed)\n        std.unicode.utf8ToUtf16LeStringLiteral("Retry")\n    else\n        std.unicode.utf8ToUtf16LeStringLiteral("Restart");')
         self.assertEqual(painter, function(source(), 'paintUpdateCard'))
 
     def test_only_list_layout_changes(self):

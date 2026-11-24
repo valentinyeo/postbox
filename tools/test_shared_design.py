@@ -22,7 +22,7 @@ class SharedDesignTests(unittest.TestCase):
         self.assertIn('if (verification_fixture)', main[main.index('fn ensureDictation('):main.index('fn toggleDictation(')])
         capture = (ROOT / 'src/dictation.zig').read_text()
         self.assertIn('if (self.fixture) |fixture| parseResponse(self.allocator, fixture.response)', capture)
-        self.assertIn('captureMicrophone(self)', capture)
+        self.assertIn('captureMicrophone(self, &receiver)', capture)
 
     def test_hash_and_literal_checks_reject_real_drift(self):
         with tempfile.TemporaryDirectory() as directory:

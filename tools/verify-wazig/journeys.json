@@ -37,6 +37,24 @@
       "prepare": "prepare-dictation.ps1"
     },
     {
+      "name": "dictation-live",
+      "pr": true,
+      "hub": "dictation-live",
+      "evidence": true,
+      "chats": 2,
+      "script": "journey-dictation-live.ps1",
+      "validator": {
+        "file": "check-dictation-live-evidence.py",
+        "function": "check_evidence"
+      },
+      "hub_handler": {
+        "file": "dictation-fixture.py",
+        "class": "DictationHandler"
+      },
+      "maximize": true,
+      "prepare": "prepare-dictation.ps1"
+    },
+    {
       "name": "sidebar-surface",
       "pr": true,
       "hub": null,
@@ -972,6 +990,34 @@
         "file": "real-size-fixture.py",
         "class": "RealSizeHandler"
       },
+      "maximize": true
+    },
+    {
+      "name": "deep-links",
+      "pr": true,
+      "hub": "deep-links",
+      "evidence": true,
+      "chats": 4,
+      "script": "journey-deep-links.ps1",
+      "validator": {
+        "file": "check-deep-links-evidence.py",
+        "function": "check_evidence"
+      },
+      "hub_handler": {
+        "file": "deep-links-fixture.py",
+        "class": "DeepLinksHandler"
+      },
+      "maximize": true
+    },
+    {
+      "name": "exit-record",
+      "pr": true,
+      "hub": null,
+      "evidence": false,
+      "chats": null,
+      "script": "journey-exit-record.ps1",
+      "validator": null,
+      "hub_handler": null,
       "maximize": true
     }
   ]
