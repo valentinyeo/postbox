@@ -28,7 +28,7 @@
 - This proves the client contract against synthetic loopback data, not a real Slack account, delivery or deployed triage service. Inspect the screenshots before claiming visible behavior.
 - Only real keyboard input drives the desktop. Read-only state and UI Automation supplement screenshots; no private window messages or control mutations are used.
 - Equal-time/name ties, pin precedence and cached timestamp fallback are source/CI coverage, not assertions of this four-row journey. Comparator unit tests include equal timestamps with names deliberately opposite to ID order. No Zig, PowerShell or app execution is performed on the development host.
-- Source: `fillSlackTimestamp` (`src/main.zig:3598`) fills missing Slack times from message cache; `controlSortChats` (`src/main.zig:15273`) and `shouldMoveUp` (`src/chat_order.zig:66`) order pinned rows, last message times, names and identity ties; `src/slack.zig:191` reads actual last-message time rather than channel creation/modification time.
+- Source: `fillSlackTimestamp` fills missing Slack times from message cache; `controlSortChats` and `shouldMoveUp` in `src/chat_order.zig` order pinned rows, last message times, names and identity ties; `src/slack.zig` reads the actual last-message time rather than channel creation or modification time.
 - Journey and evidence: `tools/verify-wazig/journey-slack-sort.ps1` drives the three stages, `SlackSortHandler` (`tools/verify-wazig/fake-hub.py:987`) supplies the synthetic hub, and `tools/verify-wazig/evidence-slack-sort.py` validates retained orders, times, keyboard walks, selection, delivery, send and isolation.
 
 ### Sent chat retention
