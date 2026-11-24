@@ -36,6 +36,10 @@ FAMILY_NAMES = {
 DECLARATION = re.compile(r'^Author model: (\S+)$')
 EVIDENCE_FILES = ('preexisting.txt', 'failure.txt', 'journey-check-failed.txt', 'clean-result.txt', 'result.txt',
                   'classification.json', 'side-effects.json', 'cleanup.txt', 'doctor.json')
+JOURNEY_FOLDER = 'verify-wazig-'
+JOURNEY_PASSED = 'JOURNEY PASSED:'
+JOURNEY_SKILL = '/verify-wazig'
+JOURNEY_MAP = Path(__file__).resolve().parent / 'pr-journeys.json'
 TIMEOUT = 'Timed out:'
 FAILURE_EVIDENCE = ('failure.txt:', 'journey-check-failed.txt:')
 MAX_FILE = 600
@@ -310,6 +314,102 @@ def evidence_failures(evidence):
     return found
 
 
+def planned(needs):
+    plan = needs.get('plan') or {}
+    try:
+        rows = json.loads((plan.get('outputs') or {}).get('matrix') or '{}').get('include') or []
+        return [str(row['feature']) for row in rows if row.get('feature')], []
+    except (ValueError, TypeError, KeyError, AttributeError):
+        return [], ['the plan matrix was unreadable, so no journey is known to have run.']
+
+
+def no_journey_reason(needs):
+    plan = needs.get('plan') or {}
+    if plan.get('result') != 'success':
+        return f"the plan job ended {plan.get('result') or 'without a result'}, so it named no journey"
+    if str((plan.get('outputs') or {}).get('needed')).lower() == 'false':
+        return 'the plan selected no journey because the change touches no `src/` file, `build.zig` or the verify workflow'
+    return 'the plan selected no journey and gave no reason'
+
+
+def journey_lines(root):
+    root = Path(root)
+    if not root.is_dir():
+        return {}
+    found = {}
+    for folder in sorted(path for path in root.iterdir() if path.is_dir()):
+        if not folder.name.startswith(JOURNEY_FOLDER):
+            continue
+        lines = []
+        for name in ('preexisting.txt', 'failure.txt', 'journey-check-failed.txt', 'result.txt'):
+            path = folder / name
+            if path.is_file():
+                lines.append(f'{name}: {read_text(path, MAX_FILE)}')
+        found[folder.name[len(JOURNEY_FOLDER):]] = lines
+    return found
+
+
+def journey_result(lines):
+    failed = any(line.startswith(FAILURE_EVIDENCE) or (line.startswith('result.txt:') and TIMEOUT in line)
+                 for line in lines)
+    preexisting = any(line.startswith('preexisting.txt:') for line in lines)
+    if failed:
+        return 'failed on the default branch too' if preexisting else 'failed'
+    if any(line.startswith('result.txt:') and JOURNEY_PASSED in line for line in lines):
+        return 'passed'
+    return 'no evidence'
+
+
+def journey_map(path=None):
+    try:
+        paths = json.loads(Path(path or JOURNEY_MAP).read_text(encoding='utf-8'))['paths']
+    except (OSError, ValueError, KeyError, TypeError):
+        return {}
+    return {str(prefix): [str(name) for name in names]
+            for prefix, names in paths.items() if isinstance(names, list)}
+
+
+def changed_files(diff):
+    found = []
+    for line in (diff or '').splitlines():
+        for prefix in ('--- a/', '+++ b/'):
+            if line.startswith(prefix):
+                path = line[len(prefix):].strip()
+                if path and path != '/dev/null' and path not in found:
+                    found.append(path)
+    return found
+
+
+def journeys_for(path, mapping):
+    return [name for prefix, names in mapping.items() if path.startswith(prefix) for name in names]
+
+
+def journey_report(selected, folders, mapping, files, links, reason):
+    lines = []
+    notes = []
+    for feature in selected:
+        result = journey_result(folders.get(feature, []))
+        if result == 'no evidence':
+            notes.append(f'journey `{feature}` was planned but left no passing evidence, so nothing drove it on this commit')
+        lines.append((feature, result, links.get(feature, '')))
+    if not selected:
+        lines.append(('none', reason, ''))
+    reported = set()
+    for path in files:
+        for feature in journeys_for(path, mapping):
+            if feature in selected or feature in reported:
+                continue
+            reported.add(feature)
+            notes.append(f'`{path}` maps to journey `{feature}`, which did not run')
+    return lines, notes
+
+
+def with_coverage(result, notes, coverage):
+    if not coverage:
+        return result, notes
+    return ('PASS+NOTES' if result == 'PASS' else result), coverage + notes
+
+
 def journey_gate(needs, evidence):
     result, notes = verdict(needs)
     failures = evidence_failures(evidence)[:5]
@@ -364,14 +464,37 @@ def judge(needs, body, pr_text, journeys, evidence, diff, key, post=http_post, s
     return result, notes, model
 
 
-def render(result, notes, model, sha, run_url):
+def render(result, notes, model, sha, run_url, journeys=None):
     judge_line = f'Judge: {model} (Groq, a family no author used)' if model else 'Judge: none (the job results decided)'
     body = [MARKER, '### Verifier verdict', '', result, '', f'Commit {sha}', judge_line]
     if run_url:
         body.append(f'Run: {run_url}')
+    body.extend(['', '### Journeys', f'Skill: {JOURNEY_SKILL}'])
+    for feature, outcome, link in journeys or []:
+        body.append(f'- `{feature}`: {outcome}' + (f' - {link}' if link else ''))
+    if not journeys:
+        body.append('- none recorded')
     body.append('')
     body.extend(f'- {note}' for note in notes or ['No notes.'])
     return '\n'.join(body)[:60000] + '\n'
+
+
+def job_urls(repo, run_url, fetch=None):
+    match = re.search(r'/runs/([0-9]+)', run_url or '')
+    if not repo or not match:
+        return {}
+    try:
+        listed = (fetch or gh)('api', f'repos/{repo}/actions/runs/{match.group(1)}/jobs', '--paginate', '--jq',
+                               '.jobs[] | .name + "\\t" + .html_url')
+    except (subprocess.CalledProcessError, OSError):
+        return {}
+    found = {}
+    for line in listed.splitlines():
+        name, _, url = line.partition('\t')
+        job = re.fullmatch(r'verify \((.+)\)', name.strip())
+        if job and url.strip():
+            found[job.group(1)] = url.strip()
+    return found
 
 
 def gh(*args):
@@ -395,11 +518,7 @@ def main():
     pr_text = f"Title: {pull.get('title') or ''}\n\n{body}"
     repo = os.environ.get('GITHUB_REPOSITORY', '')
     number = pull.get('number')
-    plan = needs.get('plan', {}).get('outputs', {})
-    try:
-        journeys = [row['feature'] for row in json.loads(plan.get('matrix') or '{}').get('include', [])]
-    except (ValueError, TypeError, KeyError, AttributeError):
-        journeys = ['unknown (unreadable plan matrix)']
+    selected, coverage = planned(needs)
     evidence = digest(os.environ.get('EVIDENCE_DIR', 'evidence'))
     diff = ''
     if repo and number:
@@ -407,8 +526,18 @@ def main():
             diff = gh('pr', 'diff', str(number), '-R', repo)
         except (subprocess.CalledProcessError, OSError):
             diff = '[diff unavailable]'
-    result, notes, model = judge(needs, body, pr_text, journeys, evidence, diff, os.environ.get('VERDICT_API_KEY', ''))
-    text = render(result, notes, model, (pull.get('head') or {}).get('sha', ''), os.environ.get('RUN_URL', ''))
+    if diff == '[diff unavailable]':
+        coverage.append('the pull request diff was unavailable, so surfaces mapped to journeys were not checked.')
+    run_url = os.environ.get('RUN_URL', '')
+    urls = job_urls(repo, run_url)
+    links = {feature: urls.get(feature) or run_url for feature in selected}
+    files = changed_files(diff)
+    journeys, missing = journey_report(selected, journey_lines(os.environ.get('EVIDENCE_DIR', 'evidence')),
+                                       journey_map(), files, links, no_journey_reason(needs))
+    coverage.extend(missing)
+    result, notes, model = judge(needs, body, pr_text, selected, evidence, diff, os.environ.get('VERDICT_API_KEY', ''))
+    result, notes = with_coverage(result, notes, coverage)
+    text = render(result, notes, model, (pull.get('head') or {}).get('sha', ''), run_url, journeys)
     print(result + '\n\n' + text)
     summary = os.environ.get('GITHUB_STEP_SUMMARY')
     if summary:

@@ -434,5 +434,117 @@ class JudgeTests(unittest.TestCase):
         self.assertIn('openai/gpt-oss-120b', text)
 
 
+class JourneyReportTests(unittest.TestCase):
+    def setUp(self):
+        self.needs = {
+            'plan': {'result': 'success', 'outputs': {
+                'needed': 'true',
+                'matrix': json.dumps({'include': [{'feature': 'search', 'evidence': True},
+                                                 {'feature': 'voice', 'evidence': True}]}),
+            }},
+            'verify': {'result': 'success', 'outputs': {}},
+        }
+        self.links = {'search': 'https://example.test/run/7/job/1', 'voice': 'https://example.test/run/7/job/2'}
+
+    def report(self, folders, files=(), mapping=None, needs=None, links=None):
+        needs = needs or self.needs
+        selected, plan_notes = MODULE.planned(needs)
+        lines, missing = MODULE.journey_report(selected, folders, mapping or {}, list(files),
+                                               self.links if links is None else links,
+                                               MODULE.no_journey_reason(needs))
+        return lines, plan_notes + missing
+
+    def test_every_journey_that_ran_is_named_with_its_link(self):
+        folders = {'search': ['result.txt: JOURNEY PASSED: search'],
+                   'voice': ['result.txt: JOURNEY PASSED: voice']}
+        lines, notes = self.report(folders)
+        self.assertEqual(lines, [('search', 'passed', self.links['search']),
+                                 ('voice', 'passed', self.links['voice'])])
+        self.assertEqual(notes, [])
+        self.assertEqual(MODULE.with_coverage('PASS', ['A gap.'], notes), ('PASS', ['A gap.']))
+        text = MODULE.render('PASS', [], 'openai/gpt-oss-120b', 'abc', 'https://example.test/run/7', lines)
+        self.assertIn('### Journeys', text)
+        self.assertIn(f'Skill: {MODULE.JOURNEY_SKILL}', text)
+        self.assertIn('- `search`: passed - ' + self.links['search'], text)
+        self.assertIn('- `voice`: passed - ' + self.links['voice'], text)
+
+    def test_no_journey_plan_names_the_reason_instead_of_leaving_it_blank(self):
+        needs = {'plan': {'result': 'success', 'outputs': {'needed': 'false', 'matrix': '{"include":[]}'}},
+                 'verify': {'result': 'skipped', 'outputs': {}}}
+        lines, notes = self.report({}, needs=needs)
+        self.assertEqual([row[0] for row in lines], ['none'])
+        self.assertIn('the plan selected no journey', lines[0][1])
+        self.assertEqual(notes, [])
+        text = MODULE.render('PASS', [], None, 'abc', 'https://example.test/run/7', lines)
+        self.assertIn('- `none`: the plan selected no journey', text)
+
+    def test_unmapped_surface_note_blocks_a_silent_pass(self):
+        lines, notes = self.report({'search': ['result.txt: JOURNEY PASSED: search']},
+                                   files=['src/archive/handle.zig'], mapping={'src/archive/': ['archive']})
+        self.assertIn('`src/archive/handle.zig` maps to journey `archive`, which did not run', notes)
+        self.assertEqual(MODULE.with_coverage('PASS', [], notes)[0], 'PASS+NOTES')
+
+    def test_a_planned_journey_without_evidence_also_blocks_a_silent_pass(self):
+        lines, notes = self.report({'search': ['result.txt: JOURNEY PASSED: search']})
+        self.assertIn(('voice', 'no evidence', self.links['voice']), lines)
+        self.assertIn('journey `voice` was planned but left no passing evidence', ' '.join(notes))
+        self.assertEqual(MODULE.with_coverage('PASS', [], notes)[0], 'PASS+NOTES')
+
+    def test_a_failure_already_red_on_the_default_branch_is_named_as_such(self):
+        folders = {'voice': ['preexisting.txt: preexisting voice failed', 'failure.txt: voice: playback stalled']}
+        lines, _ = self.report(folders)
+        self.assertIn(('voice', 'failed on the default branch too', self.links['voice']), lines)
+
+    def test_journey_lines_read_the_evidence_folders(self):
+        with tempfile.TemporaryDirectory() as temp:
+            folder = Path(temp) / 'verify-wazig-search'
+            folder.mkdir()
+            (folder / 'result.txt').write_text('JOURNEY PASSED: search\n')
+            (folder / 'preexisting.txt').write_text('preexisting search failed\n')
+            other = Path(temp) / 'verify-wazig-voice'
+            other.mkdir()
+            (other / 'failure.txt').write_text('voice: playback stalled\n')
+            self.assertEqual(MODULE.journey_lines(temp), {
+                'search': ['preexisting.txt: preexisting search failed', 'result.txt: JOURNEY PASSED: search'],
+                'voice': ['failure.txt: voice: playback stalled'],
+            })
+            self.assertEqual(MODULE.journey_lines(Path(temp) / 'none'), {})
+
+    def test_changed_files_reads_diff_headers(self):
+        diff = ('diff --git a/src/archive/handle.zig b/src/archive/handle.zig\n--- a/src/archive/handle.zig\n'
+                '+++ b/src/archive/handle.zig\n@@ -1 +1 @@\n--- not a header\n'
+                'diff --git a/gone.zig b/gone.zig\n--- a/gone.zig\n+++ /dev/null')
+        self.assertEqual(MODULE.changed_files(diff), ['src/archive/handle.zig', 'gone.zig'])
+
+    def test_the_journey_map_comes_from_the_pull_request_mapping(self):
+        mapping = MODULE.journey_map()
+        self.assertIn('search', mapping['src/search'])
+        self.assertIn('voice', mapping['src/audio'])
+
+    def test_job_links_name_the_matrix_job(self):
+        listed = []
+
+        def fetch(*args):
+            listed.append(args)
+            return 'verify (search)\thttps://example.test/job/1\nverify-verdict\thttps://example.test/job/9\n'
+
+        self.assertEqual(MODULE.job_urls('o/r', 'https://github.com/o/r/actions/runs/42', fetch=fetch),
+                         {'search': 'https://example.test/job/1'})
+        self.assertIn('repos/o/r/actions/runs/42/jobs', listed[0])
+        self.assertEqual(MODULE.job_urls('o/r', ''), {})
+
+        def broken(*args):
+            raise subprocess.CalledProcessError(1, 'gh')
+
+        self.assertEqual(MODULE.job_urls('o/r', 'https://github.com/o/r/actions/runs/42', fetch=broken), {})
+
+    def test_an_unreadable_plan_matrix_is_not_reported_as_a_journey(self):
+        needs = {'plan': {'result': 'success', 'outputs': {'needed': 'true', 'matrix': 'not json'}},
+                 'verify': {'result': 'success', 'outputs': {}}}
+        lines, notes = self.report({}, needs=needs)
+        self.assertEqual([row[0] for row in lines], ['none'])
+        self.assertIn('the plan matrix was unreadable', ' '.join(notes))
+
+
 if __name__ == '__main__':
     unittest.main()
