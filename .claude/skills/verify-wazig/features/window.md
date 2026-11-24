@@ -9,14 +9,14 @@
 
 ## How to get to it (user POV)
 
-- Start Messages, including after installation: the main window opens maximized.
+- Start Postbox, including after installation: the main window opens maximized.
 - Restore and resize through the window system menu, then close with Alt+F4.
-- Reopen Messages or let an update relaunch it: it opens maximized again on its saved monitor. Restore retains the normal size.
+- Reopen Postbox or let an update relaunch it: it opens maximized again on its saved monitor. Restore retains the normal size.
 
 ## Driving it with PowerShell UI Automation
 
 - Run feature=window on GitHub Actions. Reuse run.ps1's isolated cached-chat profile, process-local registry redirect and recorded session. Unlike other journeys, the harness must not maximize this window for the app.
-- Wait for the main window and run the read-only doctor. Read IsZoomed, GetWindowPlacement and MonitorFromWindow/GetMonitorInfo through user32 P/Invoke. Save start-1.png before requiring zoomed=true; startup creates the window with WS_MAXIMIZE and calls SW_SHOWMAXIMIZED (`src/main.zig:22281`, `src/main.zig:22294`), so the journey fails with Main window not zoomed at start 1 only if that regresses.
+- Wait for the main window and run the read-only doctor. Read IsZoomed, GetWindowPlacement and MonitorFromWindow/GetMonitorInfo through user32 P/Invoke. Save start-1.png before requiring zoomed=true; startup creates the window with WS_MAXIMIZE and calls SW_SHOWMAXIMIZED (`WS_MAXIMIZE` and `SW_SHOWMAXIMIZED` in the window creation code), and logs `startup: window zoomed=true` from the same function, so the journey fails with Main window not zoomed at start 1 only if that regresses.
 - After foreground ownership checks, use SendKeys Alt+Space, R to restore, then Alt+Space, S and arrow keys to shrink both dimensions. Require zoomed=false and a smaller normal rect; save restored.png.
 - Send Alt+F4, require process exit, and relaunch the same ProcessStartInfo with WAZIG_VERIFY_RESTART set to the fixture ID. Immediately replace the session manifest PID and start ticks before waiting for the new window and running doctor. Require zoomed=true, the saved monitor and normal rect; save start-2.png.
 - Close again with Alt+F4, wait for exit, append --update-relaunch and repeat the same-profile launch, manifest update and doctor. Require zoomed=true, the saved monitor and normal rect; save start-3.png.

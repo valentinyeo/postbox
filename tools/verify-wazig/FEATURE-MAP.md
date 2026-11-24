@@ -176,11 +176,11 @@ Words appear in the composer before Stop, interim revisions replace the same spa
 
 ### How to get to it (user POV)
 
-Run `gh workflow run verify.yml -f feature=dictation-live -f repeat=3`. Choose a dictation language in Ctrl+K, focus the composer, place the cursor inside existing text, and press Ctrl+D. Press Ctrl+D again to stop.
+Choose a dictation language in Ctrl+K, put the cursor inside a sentence in the composer and press Ctrl+D. Words appear as you speak and each new guess replaces the previous one in the same span; the words before and after the cursor stay put. Press Ctrl+D again to stop, and the last transcript is inserted once.
 
 ### Driving it with PowerShell UI Automation
 
-`journey-dictation-live.ps1` types `Before after` and places the cursor between the words using real keys. The loopback Deepgram WebSocket receives PCM through the production WinHTTP transport. It sends a fragmented interim response, waits for the journey to observe that text while recording, then sends a revised interim. Only CloseStream releases the final response, replayed twice. UI Automation and bounded native text reads require the exact composer content and recording/idle phase at each step for all three languages. Evidence includes screenshots, owned-process snapshots, request parameters, and ordered service events.
+`journey-dictation-live.ps1` types `Before after` and places the cursor between the words using real keys. Run `feature=dictation-live` with `-f repeat=3` on GitHub-hosted Windows; every repeat must pass before a probe merges. The loopback Deepgram WebSocket receives PCM through the production WinHTTP transport. It sends a fragmented interim response, waits for the journey to observe that text while recording, then sends a revised interim. Only CloseStream releases the final response, replayed twice. UI Automation and bounded native text reads require the exact composer content and recording/idle phase at each step for all three languages. Evidence includes screenshots, owned-process snapshots, request parameters, and ordered service events.
 
 ### Gotchas
 

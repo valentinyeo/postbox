@@ -1,6 +1,6 @@
 # Verification index
 
-Journey names, PR coverage, fixture modes and dispatch files are registered once in [journeys.json](../../../tools/verify-wazig/journeys.json). Each registered name has a corresponding `features/<name>.md` recipe.
+Journey names, PR coverage, fixture modes and dispatch files are registered once in [journeys.json](../../../tools/verify-wazig/journeys.json). Each registered name has one guide: `features/<name>.md`, or a `Journey: <name>` section of [FEATURE-MAP.md](../../../tools/verify-wazig/FEATURE-MAP.md) for `real-size`, `deep-links` and `dictation-live`.
 
 Bounded recent-change coverage lives in [features/README.md](features/README.md). Launch and evidence rules live in [SKILL.md](SKILL.md); [RULE-MAP.md](RULE-MAP.md) links feature-specific acceptance rules.
 

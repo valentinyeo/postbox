@@ -3,14 +3,14 @@
 ## Sub-features
 
 - `account-view`: one Telegram view participates in saved Alt-key order and the combined inbox. User, basic-group and channel handles remain opaque. The existing badge path paints a blue paper-plane mark; the saved flag identifies Saved Messages.
-- `hub-only-linking`: link once through the triage CLI on the hub. Wazig only lists existing hub chats; unlinked Telegram is an ordinary empty list with no QR or password input.
-- `actions`: history, text, files, replies, reactions, read receipts, automatic media downloads and live SSE use the unified routes. Telegram rate limited stays in failed message text without automatic resend. Ctrl+E archives and unarchives locally in Wazig, without a hub archive POST. Contact, group and bot avatars use the existing authenticated hub avatar worker and chat-list photo rendering; absent photos keep the letter circle. The default-on `hub.igsh_696_telegram_avatars` switch applies only with the unified hub configured.
+- `hub-only-linking`: link once through the triage CLI on the hub. Postbox only lists existing hub chats; unlinked Telegram is an ordinary empty list with no QR or password input.
+- `actions`: history, text, files, replies, reactions, read receipts, automatic media downloads and live SSE use the unified routes. Telegram rate limited stays in failed message text without automatic resend. Ctrl+E archives and unarchives locally in Postbox, without a hub archive POST. Contact, group and bot avatars use the existing authenticated hub avatar worker and chat-list photo rendering; absent photos keep the letter circle. The default-on `hub.igsh_696_telegram_avatars` switch applies only with the unified hub configured.
 - `hub-only-login`: when a hub is configured, no direct Telegram connect/logout/remove palette entries, TDLib initialization or phone, code or app-key screens are reachable.
 
 ## How to get to it (user POV)
 
-- Configure the triage hub and choose Show Telegram in Ctrl+K or its assigned Alt+N (account position plus one) position. Account linking belongs to that hub, not a second Wazig connection.
-- Link Telegram through the triage CLI on the hub, never inside Wazig. Esc leaves an empty view and Alt+number/Alt+I remain usable; a saved empty Telegram view falls back to the combined inbox at startup.
+- Configure the triage hub and choose Show Telegram in Ctrl+K or its assigned Alt+N (account position plus one) position. Account linking belongs to that hub, not a second Postbox connection.
+- Link Telegram through the triage CLI on the hub, never inside Postbox. Esc leaves an empty view and Alt+number/Alt+I remain usable; a saved empty Telegram view falls back to the combined inbox at startup.
 - Select a chat and use the existing composer, Attach photo or file, Reply to selected message and reaction commands. Saved Messages appears in the same list.
 
 ## Driving it with PowerShell UI Automation
@@ -31,6 +31,6 @@
 - Windows builds, Zig tests, PowerShell parsing/execution and desktop evidence belong to GitHub Actions. Static source checks on the development host are not runtime verification.
 - Empty Telegram and Signal views are registered before provider rows exist. Default provider order puts Telegram before Signal; existing saved order still takes precedence.
 - Routing and cache accounts remain in the existing hub namespace. The view account is fixed to telegram, independent of user/group/channel identifiers. src/hub_test.zig covers opaque IDs, view isolation, badge fallback, exact rate-limit text/status and saved-flag parsing.
-- The chat header pill draws a 24-pixel initial-letter circle for every provider (`src/main.zig:18597-18609`); this journey does not measure it. Restart reuse follows the existing avatar cache classifier; the journey measures cold fetch and disk persistence, not a second launch.
+- The chat header pill draws a 24-pixel initial-letter circle for every provider (the chat-header pill drawing code in `src/main.zig`); this journey does not measure it. Restart reuse follows the existing avatar cache classifier; the journey measures cold fetch and disk persistence, not a second launch.
 - Startup time, release size, working set, hub CLI linking, voice playback and cached transcription need CI or live-provider evidence; unchanged mechanisms are not re-certified here.
 - IGSH-736 intentionally changes the archiveChat routing identity pin in check-views-source.py: hub Telegram and Signal now use the existing local archive state, preserving opaque provider/account/chat keys and bypassing hub archive writes. Other routing pins remain unchanged.

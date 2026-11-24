@@ -29,7 +29,7 @@
 
 ## Gotchas
 
-- Staging holds up to 16 images (`src/staged_images.zig:3`) and the + control is enabled on WhatsApp and Slack. The journey and evidence assertions require both images to stay staged and send in order, not just a successful exit.
+- Staging holds up to 16 images (`staged_images.capacity`) and the + control is enabled on WhatsApp and Slack. The journey and evidence assertions require both images to stay staged and send in order, not just a successful exit.
 - Runtime proof, PowerShell parsing, Zig builds/tests and screenshot inspection belong to GitHub Windows. Local light checks do not prove a successful paste or send.
 - Synthetic hub acceptance is not upstream provider delivery or authentication. One account per provider is covered; direct-provider transport and multiple same-provider account isolation retain their existing coverage.
 - The image path retains source dimensions; screenshot evidence shows the preview, not an intentionally downscaled upload. No new paste size policy, retry delay or timeout is introduced.

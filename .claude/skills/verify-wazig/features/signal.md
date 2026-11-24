@@ -3,8 +3,8 @@
 ## Sub-features
 
 - `account-view`: a single Signal account, labelled Signal, participates in saved account order and the combined inbox. Its rows carry a #3A76F0 mark with a white speech bubble through the shared provider badge path.
-- `hub-only-linking`: link once through the triage CLI on the hub. Wazig only lists chats already present there; an unlinked provider is an ordinary empty list, never a login screen.
-- `actions`: opaque Signal handles use existing unified history, text, multipart attachments, reactions, author/timestamp read receipts, media and live events. Ctrl+E archives and unarchives locally in Wazig, without a hub archive POST.
+- `hub-only-linking`: link once through the triage CLI on the hub. Postbox only lists chats already present there; an unlinked provider is an ordinary empty list, never a login screen.
+- `actions`: opaque Signal handles use existing unified history, text, multipart attachments, reactions, author/timestamp read receipts, media and live events. Ctrl+E archives and unarchives locally in Postbox, without a hub archive POST.
 - `terminal-errors`: rate-limit and captcha rejections remain in failed message text with their reason. They leave the send queue without automatic retry; manual resend remains available.
 
 ## How to get to it (user POV)
@@ -17,7 +17,7 @@
 ## Driving it with PowerShell UI Automation
 
 - Run feature=signal on GitHub Actions only. run.ps1 starts fake-hub.py --signal in the isolated native desktop profile; harness.ps1 supplies read-only wazigctl and owned keyboard helpers; signal.ps1 drives the journey.
-- The fake hub starts linked. Press Alt+I and require the four Signal chats in the combined inbox, capture inbox.png and inbox.chats.json, then press the Signal account's assigned Alt+number key, require four Signal-only chats, capture linked.png and measure brand-blue pixels in the sidebar. No linking is driven through Wazig.
+- The fake hub starts linked. Press Alt+I and require the four Signal chats in the combined inbox, capture inbox.png and inbox.chats.json, then press the Signal account's assigned Alt+number key, require four Signal-only chats, capture linked.png and measure brand-blue pixels in the sidebar. No linking is driven through Postbox.
 - Open Verification Signal through the palette. Assert exact history identity and content, author/timestamp mark-read payload and cleared unread state, automatic attachment download and durable cache.
 - Select an incoming message and choose Like; require a recorded reaction and visible reaction through wazigctl. Send Synthetic Signal outgoing; require one accepted JSON send and visible acknowledged history.
 - Choose Attach photo or file, enter a generated PNG in the owned native picker, then send a caption. Require one multipart write with exact bytes, size, filename, chat and client ID, plus the visible file message.

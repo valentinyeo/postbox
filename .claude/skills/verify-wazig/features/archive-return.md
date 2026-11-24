@@ -12,7 +12,7 @@ Driven by `journey-archive-return.ps1`: `whatsapp-return` and `kept-stays`. The 
 - `telegram-return`: a Telegram chat returns the same way.
 - `muted-return`: a muted archived chat returns too.
 - `bulk-return`: Ctrl+A then Ctrl+E, then one incoming returns its chat.
-- `kept-stays`: a chat kept with Ctrl+Shift+E stays archived.
+- `kept-stays`: a chat kept with Ctrl+Shift+E stays archived, including when it receives a newer message of its own, and a newer archived message on another chat never releases it.
 
 ## How to get to it (user POV)
 
@@ -24,7 +24,7 @@ Driven by `journey-archive-return.ps1`: `whatsapp-return` and `kept-stays`. The 
 
 - Run `feature=archive-return` on GitHub Actions only.
 - Archive one WhatsApp chat (`business:notification-inbox@s.whatsapp.net`) with Ctrl+E, then deliver one incoming message through the fixture trigger.
-- Require the chat back in the inbox and the return acknowledged. Then keep the same chat with Ctrl+Shift+E, replay an archived notification through the fixture and require it to stay hidden.
+- Require the chat back in the inbox and the return acknowledged. Then keep the same chat with Ctrl+Shift+E and deliver a newer archived message on `business:notification-archived@s.whatsapp.net`; that chat, which was never kept, must return to the inbox. Deliver one more message to the kept chat and require a fresh chats pull, the kept chat still listed as an archived row through `chats --archived`, and the chat absent from the inbox list. The pull count is taken before the notification, so the assertion cannot pass on a stale list.
 
 ## Gotchas
 
