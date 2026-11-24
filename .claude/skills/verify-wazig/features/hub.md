@@ -1,6 +1,6 @@
 # Unified message hub
 
-The IGSH-531 backend runs through the existing transport interface with no new UI. The hub resolves opaque conversation handles; Wazig retains Slack, Telegram and WhatsApp labels and filters.
+The IGSH-531 backend runs through the existing transport interface with no new UI. The hub resolves opaque conversation handles; Postbox retains Slack, Telegram and WhatsApp labels and filters.
 
 ## Sub-features
 

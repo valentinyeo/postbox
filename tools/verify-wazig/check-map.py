@@ -58,6 +58,11 @@ for filename in ['SKILL.md', 'features/README.md', 'INDEX.md']:
     assert not re.search(r'feature=[a-z-]+\|', prose), (filename, 'hand-maintained journey options')
     assert not re.search(r'(?:Matching PRs run|path triggers run the) `', prose), (filename, 'hand-maintained PR journey list')
 index = (skill / 'features/README.md').read_text(encoding='utf-8')
+map_only = sorted(set(public_journeys) & set(options))
+for name in map_only:
+    for filename in ['INDEX.md', 'features/README.md']:
+        assert f'`{name}`' in (skill / filename).read_text(encoding='utf-8'), (
+            filename, 'name the FEATURE-MAP guide for', name)
 for feature in features:
     entry = (re.sub(r'^### ', '## ', public_journeys[feature], flags=re.M) if feature in public_journeys else
              (skill / 'features' / f'{feature}.md').read_text(encoding="utf-8"))
@@ -104,7 +109,7 @@ coverage_ids = set()
 for line in coverage[1].splitlines():
     if not line.startswith('- '):
         continue
-    bullet = re.fullmatch(r'- ((?:IGSH|WAZI)-[0-9]+): .+ -> (.+)', line)
+    bullet = re.fullmatch(r'- ((?:IGSH|WAZI|SOFT)-[0-9]+): .+ -> (.+)', line)
     assert bullet, ('malformed coverage bullet', line)
     ticket, disposition = bullet.groups()
     assert ticket not in coverage_ids, ('duplicate coverage ticket', ticket)

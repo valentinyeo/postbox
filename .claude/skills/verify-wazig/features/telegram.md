@@ -3,14 +3,14 @@
 ## Sub-features
 
 - `account-view`: one Telegram view participates in saved Alt-key order and the combined inbox. User, basic-group and channel handles remain opaque. The existing badge path paints a blue paper-plane mark; the saved flag identifies Saved Messages.
-- `hub-only-linking`: link once through the triage CLI on the hub. Wazig only lists existing hub chats; unlinked Telegram is an ordinary empty list with no QR or password input.
-- `actions`: history, text, files, replies, reactions, read receipts, automatic media downloads and live SSE use the unified routes. Telegram rate limited stays in failed message text without automatic resend. Ctrl+E archives and unarchives locally in Wazig, without a hub archive POST. Contact, group and bot avatars use the existing authenticated hub avatar worker and chat-list photo rendering; absent photos keep the letter circle. The default-on `hub.igsh_696_telegram_avatars` switch applies only with the unified hub configured.
+- `hub-only-linking`: link once through the triage CLI on the hub. Postbox only lists existing hub chats; unlinked Telegram is an ordinary empty list with no QR or password input.
+- `actions`: history, text, files, replies, reactions, read receipts, automatic media downloads and live SSE use the unified routes. Telegram rate limited stays in failed message text without automatic resend. Ctrl+E archives and unarchives locally in Postbox, without a hub archive POST. Contact, group and bot avatars use the existing authenticated hub avatar worker and chat-list photo rendering; absent photos keep the letter circle. The default-on `hub.igsh_696_telegram_avatars` switch applies only with the unified hub configured.
 - `hub-only-login`: when a hub is configured, no direct Telegram connect/logout/remove palette entries, TDLib initialization or phone, code or app-key screens are reachable.
 
 ## How to get to it (user POV)
 
-- Configure the triage hub and choose Show Telegram in Ctrl+K or its assigned Alt+N (account position plus one) position. Account linking belongs to that hub, not a second Wazig connection.
-- Link Telegram through the triage CLI on the hub, never inside Wazig. Esc leaves an empty view and Alt+number/Alt+I remain usable; a saved empty Telegram view falls back to the combined inbox at startup.
+- Configure the triage hub and choose Show Telegram in Ctrl+K or its assigned Alt+N (account position plus one) position. Account linking belongs to that hub, not a second Postbox connection.
+- Link Telegram through the triage CLI on the hub, never inside Postbox. Esc leaves an empty view and Alt+number/Alt+I remain usable; a saved empty Telegram view falls back to the combined inbox at startup.
 - Select a chat and use the existing composer, Attach photo or file, Reply to selected message and reaction commands. Saved Messages appears in the same list.
 
 ## Driving it with PowerShell UI Automation

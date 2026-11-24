@@ -197,7 +197,7 @@ def cmd_ctl(args):
 def build_parser():
     parser = argparse.ArgumentParser(
         prog="vw.py",
-        description="Control CLI for Wazig verification. Every command prints JSON and passes exit codes through.",
+        description="Control CLI for Postbox verification. Every command prints JSON and passes exit codes through.",
         epilog="Dispatch and read results from any machine with gh. Drive and ctl run only on a GitHub Windows runner.",
     )
     sub = parser.add_subparsers(dest="command", required=True, metavar="command")

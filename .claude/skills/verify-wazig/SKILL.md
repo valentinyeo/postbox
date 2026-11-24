@@ -1,11 +1,11 @@
 ---
 name: verify-wazig
-description: Verify the Wazig Messages native Windows desktop through real keyboard input and UI Automation on GitHub Actions; use for UI regressions, user journeys and screenshot evidence without real provider accounts.
+description: Verify the Postbox native Windows desktop through real keyboard input and UI Automation on GitHub Actions; use for UI regressions, user journeys and screenshot evidence without real provider accounts.
 ---
 
 pstack: 0.15.43
 
-# Verify Wazig Messages
+# Verify Postbox
 
 ## Launch
 
@@ -30,7 +30,7 @@ Automerge waits for the successful `verify-wazig` run on the PR head; unrelated 
 
 `verify.yml` installs Zig 0.16.0 and builds `Messages.exe`, `wazigctl.exe` and bundled IBM Plex fonts with the same Windows `--release=small` build used by ci.yml's unfurl-verification job. The workflow pins the evidence build to `0.0.526` (not the default or release version); this base desktop build does not include TDLib. It does not download or install wacli, authenticate a provider, or install the app. The `whatsapp-hub` journey additionally verifies the production HTTPS backend against an authenticated loopback fake bridge; it never contacts a real provider. Loopback HTTP is allowed only inside the guarded verification fixture.
 
-The workflow runs `pwsh -NoProfile -File tools/verify-wazig/run.ps1 -Feature search -Bin zig-out/bin -Evidence verification-evidence`. It starts the real `Messages.exe --verify-fixture` with a fresh GUID directory under `RUNNER_TEMP`. Two entirely synthetic local cached chats, `Verification Alpha` and `Verification Beta`, load through the production cache parser. They initially contain no messages except for menus, which seeds one synthetic cached message, and text-comparison, which loads `src/verify_text.json` through the guarded fixture; archive adds an incoming fixture message. Ready means a `MessagesZig` window titled `<view label> - Wazig v0.0.526` (with `Combined inbox` for the combined view; `Wazig v0.0.526` is accepted before a view is known), an enabled composer, and `DOCTOR PASSED` in the log, not merely a living process.
+The workflow runs `pwsh -NoProfile -File tools/verify-wazig/run.ps1 -Feature search -Bin zig-out/bin -Evidence verification-evidence`. It starts the real `Messages.exe --verify-fixture` with a fresh GUID directory under `RUNNER_TEMP`. Two entirely synthetic local cached chats, `Verification Alpha` and `Verification Beta`, load through the production cache parser. They initially contain no messages except for menus, which seeds one synthetic cached message, and text-comparison, which loads `src/verify_text.json` through the guarded fixture; archive adds an incoming fixture message. Ready means a `MessagesZig` window titled `<view label> - Postbox v0.0.526` (with `Combined inbox` for the combined view; `Postbox v0.0.526` is accepted before a view is known), an enabled composer, and `DOCTOR PASSED` in the log, not merely a living process.
 
 The flag requires `GITHUB_ACTIONS=true`, isolated `LOCALAPPDATA` and `USERPROFILE`, and a new verification registry key. Process-local HKCU redirection keeps saved settings and secrets separate. A unique `USERNAME` also isolates the control pipe; the outbox mutex already keys on the data directory. Local provider workers, authentication probes, Telegram initialization, sync and updater checks are disabled. The registry-backed hub journeys enable the hub worker and SSE reader, using the isolated registry `WaBridgeUrl` and a fake DPAPI `WaBridgeKey`. This is launch-time fixture seeding, not an endpoint that sets the result of the journey. Normal launches are unchanged. The five original recipes use only launch-time fixture seeding. Archive additionally uses an isolated file-backed provider at the enqueue/archive transport boundary; it supplies incoming messages and archive acknowledgements to the production merge path.
 

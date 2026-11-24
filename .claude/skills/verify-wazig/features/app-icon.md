@@ -22,4 +22,4 @@
 
 - Hosted shell DPI remains unchanged. The 144-DPI transition is synthetic; resource-24.png separately proves the 150% small icon. Do not describe this as a physical high-DPI monitor test.
 - Launch only through the isolated fixture harness. Input belongs only to the hosted test desktop.
-- The notification icon is the embedded `assets/postbox-icon.png`, registered through `toast.register` (`src/main.zig:3040`), not resource 1. Installer shortcuts resolve the executable icon; the update feed has no separate icon asset.
+- The notification icon is the embedded `assets/postbox-icon.png`, registered through `toast.register` (`src/main.zig:3048`), not resource 1. Installer shortcuts resolve the executable icon; the update feed has no separate icon asset.
