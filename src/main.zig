@@ -70,6 +70,7 @@ const chat_screen = @import("chat_screen.zig");
 const shortcuts = @import("shortcuts.zig");
 const control_api = @import("control.zig");
 const control_pipe = @import("control_pipe.zig");
+const deep_link = @import("deep_link.zig");
 const mf_lazy = @import("mf_lazy.zig");
 const shell_lazy = @import("shell_lazy.zig");
 const bitmap_lru = @import("bitmap_lru.zig");
@@ -137,6 +138,7 @@ const wm_startup_probe = win.WM_APP + 8;
 const wm_gif_search = win.WM_APP + 9;
 const wm_gif_tile = win.WM_APP + 10;
 const wm_gif_media = win.WM_APP + 11;
+const wm_open_link = win.WM_APP + 12;
 const wacli_queue_size = 8;
 const max_wacli_args = 16;
 const wacli_arg_cap = 4095;
@@ -974,7 +976,7 @@ const App = struct {
     update_click_wait: bool = false,
     update_card_error: [96]u8 = undefined,
     update_card_error_len: usize = 0,
-    update_card_error_source: enum { update, general, message_read, chats_read } = .update,
+    update_card_error_source: enum { update, general, message_read, chats_read, deep_link } = .update,
     update_dismissed: [32]u8 = undefined,
     update_dismissed_len: usize = 0,
     chats: []Chat = &.{},
@@ -1193,6 +1195,10 @@ const App = struct {
     reply_flash: Utf8Text(191) = .{},
     reply_notice: bool = false,
     pending_reply_jump: Utf8Text(191) = .{},
+    pending_deep_link: Utf8Text(511) = .{},
+    pending_link_target: ?deep_link.Target = null,
+    pending_link_chat: chat_key.Stored = .{},
+    chats_loaded_once: bool = false,
     reply_close_hover: bool = false,
     displayed_provider: transport.Provider = .whatsapp,
     displayed_account: Utf8Text(32) = .{},
@@ -7835,6 +7841,7 @@ fn loadChatsCache(a: *App) void {
             a.chats_raw_flags = 3;
         } else |_| {}
         logStartupMilestone(a, .chats, "chat list from cache");
+        processPendingDeepLink(a, false);
     }
     var log_buffer: [64]u8 = undefined;
     const log_line = std.fmt.bufPrint(&log_buffer, "cache-load: {d} bytes, applied={}", .{ data.len, applied }) catch "cache-load: logged";
@@ -9563,6 +9570,7 @@ fn applyMessageData(a: *App, raw: []const u8, fresh_read: bool) bool {
     if (fresh_read) markChatRead(a);
     drainMediaDownloads(a);
     if (a.message_count > 0) logStartupMilestone(a, .messages, if (fresh_read) "first messages shown (fresh)" else "first messages shown (cache)");
+    applyPendingLinkMessage(a, fresh_read);
     return true;
 }
 
@@ -15129,6 +15137,7 @@ fn controlStatus(a: *App, w: *std.Io.Writer) !void {
         try w.print(",\"canvas_up_count\":{d},\"canvas_up_point\":[{d},{d}],\"reply_jump_count\":{d},\"reply_jump_id\":", .{ a.verification_canvas_up_count, a.verification_canvas_up_point.x, a.verification_canvas_up_point.y, a.verification_reply_jump_count });
         try control_api.writeString(w, a.verification_reply_jump_id.slice());
         try w.print(",\"canvas_cursor_count\":{d},\"canvas_cursor_point\":[{d},{d}]", .{ a.verification_cursor_count, a.verification_cursor_point.x, a.verification_cursor_point.y });
+        try w.print(",\"scroll_y\":{d},\"max_scroll\":{d}", .{ a.scroll_y, a.max_scroll });
         try w.print(",\"staged_capacity\":{d}", .{staged_images.capacity});
         const avatar_rect = a.header_icon_tip_rect;
         try w.print(",\"header_avatar\":[{d},{d},{d},{d}]", .{ avatar_rect.left, avatar_rect.top, avatar_rect.right, avatar_rect.bottom });
@@ -15433,6 +15442,7 @@ fn currentViewKey(a: *App) ?chat_key.Key {
 }
 
 fn controlSelectIndex(a: *App, index: usize) void {
+    clearDeepLinkProblem(a);
     if (index != a.selected_chat) {
         clearHeaderIconTooltip(a);
         clearReply(a);
@@ -20125,6 +20135,15 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                         std.mem.eql(u8, result.msg_id.slice(), a.slack_mark_ts.slice())) cancelSlackMark(a);
                 },
             }
+            if (result.kind == .chats and result.gen == a.chats_gen) {
+                if (result.ok or a.chats_read_attempts >= 3) processPendingDeepLink(a, true);
+            } else if (result.kind == .messages and result.gen == a.messages_gen and result.ok) {
+                applyPendingLinkMessage(a, true);
+            } else if (result.kind == .slack_workspace and result.ok) {
+                processPendingDeepLink(a, false);
+            } else if (result.kind == .slack_history and result.ok and result.gen == a.messages_gen) {
+                applyPendingLinkMessage(a, true);
+            }
             return 0;
         },
         wm_unfurl_done => {
@@ -20150,6 +20169,10 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
         },
         wm_control => {
             controlOnUi(a, @ptrFromInt(@as(usize, @bitCast(lparam))));
+            return 0;
+        },
+        wm_open_link => {
+            linkOnUi(a, @ptrFromInt(@as(usize, @bitCast(lparam))));
             return 0;
         },
         win.WM_DROPFILES => {
@@ -20229,6 +20252,9 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                 if (std.Thread.spawn(.{ .stack_size = 256 * 1024 }, controlThreadMain, .{a})) |thread| {
                     thread.detach();
                 } else |_| return -1;
+                if (std.Thread.spawn(.{ .stack_size = 256 * 1024 }, linkThreadMain, .{a})) |thread| {
+                    thread.detach();
+                } else |_| return -1;
                 loadDrafts(a);
                 if (hubConfigured(a)) {
                     a.wacli_thread = std.Thread.spawn(.{ .stack_size = 1024 * 1024 }, wacliWorkerMain, .{ a, .wacli }) catch return -1;
@@ -20239,6 +20265,7 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
                 } else {
                     loadChatsCache(a);
                     refreshMessages(a);
+                    processPendingDeepLink(a, true);
                     if (verification_text_comparison) _ = applyMessageData(a, @embedFile("verify_text.json"), false);
                 }
                 appendLaunchLog(a, if (hubConfigured(a)) "verification: hub fixture ready" else "verification: offline fixture ready");
@@ -20259,6 +20286,9 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
             if (std.Thread.spawn(.{ .stack_size = 256 * 1024 }, controlThreadMain, .{a})) |thread| {
                 thread.detach();
             } else |_| appendLaunchLog(a, "control pipe: thread failed to start");
+            if (std.Thread.spawn(.{ .stack_size = 256 * 1024 }, linkThreadMain, .{a})) |thread| {
+                thread.detach();
+            } else |_| appendLaunchLog(a, "link pipe: thread failed to start");
             if (a.wacli_slack_thread == null) {
                 a.wacli_slack_thread = std.Thread.spawn(.{ .stack_size = 1024 * 1024 }, wacliWorkerMain, .{ a, .slack }) catch null;
                 if (a.wacli_slack_thread == null) setStatus(a, "Slack worker unavailable; restart Postbox");
@@ -20288,6 +20318,7 @@ fn mainProc(hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.L
         },
         win.WM_SIZE => {
             layout(a, @intCast(loword(@bitCast(lparam))), @intCast(hiword(@bitCast(lparam))));
+            if (a.pending_link_target != null) applyPendingLinkMessage(a, false);
             return 0;
         },
         win.WM_DPICHANGED => {
@@ -21990,6 +22021,7 @@ fn formatSavedTranscripts(init: std.process.Init, input_path: []const u8, output
 pub fn main(init: std.process.Init) !void {
     process_start_ms = win.GetTickCount64();
     var update_relaunch = false;
+    var startup_link: ?[]const u8 = null;
     var argument_iterator = try init.minimal.args.iterateAllocator(init.gpa);
     defer argument_iterator.deinit();
     while (argument_iterator.next()) |argument| {
@@ -21997,6 +22029,7 @@ pub fn main(init: std.process.Init) !void {
         if (std.mem.eql(u8, argument, "--verify-fixture")) verification_fixture = true;
         if (std.mem.eql(u8, argument, "--verify-emoji-picker")) verification_emoji_picker = true;
         if (std.mem.eql(u8, argument, "--verify-text-comparison")) verification_text_comparison = true;
+        if (startup_link == null and deep_link.isPostboxUrl(argument)) startup_link = argument;
         if (std.mem.eql(u8, argument, "--format-saved-transcripts")) {
             const input = argument_iterator.next() orelse return error.MissingTranscriptInput;
             const output = argument_iterator.next() orelse return error.MissingTranscriptOutput;
@@ -22005,6 +22038,28 @@ pub fn main(init: std.process.Init) !void {
         }
         if (std.mem.eql(u8, argument, "--unfurl-smoke")) {
             std.process.exit(unfurlSmoke(init));
+        }
+    }
+    if (startup_link) |link| {
+        if (!verification_fixture) {
+            if (init.environ_map.get("LOCALAPPDATA")) |local_dir| {
+                var quick_mutex_buf: [80]u8 = undefined;
+                if (std.fmt.bufPrint(&quick_mutex_buf, "Global\\MessagesOutbox-{x}", .{std.hash.Wyhash.hash(0, local_dir)})) |quick_name| {
+                    if (std.unicode.utf8ToUtf16LeAllocZ(init.gpa, quick_name)) |quick_wide| {
+                        defer init.gpa.free(quick_wide);
+                        if (win.CreateMutexW(null, win.FALSE, quick_wide.ptr)) |quick_mutex| {
+                            defer _ = win.CloseHandle(quick_mutex);
+                            const quick_wait = win.WaitForSingleObject(quick_mutex, 0);
+                            if (quick_wait != win.WAIT_OBJECT_0 and quick_wait != win.WAIT_ABANDONED) {
+                                _ = win.AllowSetForegroundWindow(std.math.maxInt(win.DWORD));
+                                _ = control_pipe.sendLineWithPrefix(deep_link.pipe_prefix, link, 5000);
+                                return;
+                            }
+                            _ = win.ReleaseMutex(quick_mutex);
+                        }
+                    } else |_| appendCrashLog("deep-link: mutex name allocation failed\r\n");
+                } else |_| appendCrashLog("deep-link: mutex name format failed\r\n");
+            }
         }
     }
     const verification_key = if (verification_fixture) try prepareVerification(init) else null;
@@ -22042,6 +22097,11 @@ pub fn main(init: std.process.Init) !void {
     defer _ = win.CloseHandle(outbox_mutex);
     const outbox_wait = win.WaitForSingleObject(outbox_mutex, if (update_relaunch) 10_000 else 0);
     if (outbox_wait != win.WAIT_OBJECT_0 and outbox_wait != win.WAIT_ABANDONED) {
+        if (startup_link) |link| {
+            _ = win.AllowSetForegroundWindow(std.math.maxInt(win.DWORD));
+            _ = control_pipe.sendLineWithPrefix(deep_link.pipe_prefix, link, 5000);
+            return;
+        }
         _ = win.MessageBoxW(null, lit("Postbox is already running. Close that window before starting another instance."), lit("Postbox"), win.MB_OK);
         return;
     }
@@ -22087,6 +22147,7 @@ pub fn main(init: std.process.Init) !void {
     const app = try init.gpa.create(App);
     defer init.gpa.destroy(app);
     app.* = .{ .allocator = init.gpa, .people = people_index.Index.init(init.gpa), .io = init.io, .instance = instance, .wacli_path = wacli_path, .avatar_dir = avatar_dir, .slack_media_dir = slack_media_dir, .deepgram_configured = deepgram_key.len > 0, .deepgram_key = deepgram_key, .openrouter_key = openrouter_key, .openrouter_model = openrouter_model, .openrouter_configured = openrouter_key.len > 0, .format_workspace = format_workspace, .dictation_language = loadDictationLanguage(), .font_scale = loadFontScale(), .chat_view = loadChatView() };
+    if (startup_link) |link| app.pending_deep_link.set(link);
     defer app.allocator.free(app.chats);
     app.pending_archives = try app.allocator.alloc(PendingArchive, max_pending_archives);
     defer app.allocator.free(app.pending_archives);
@@ -22254,6 +22315,7 @@ pub fn main(init: std.process.Init) !void {
     if (win.OleInitialize(null) < 0) return error.OleInitializeFailed;
     defer win.OleUninitialize();
     migrateProductName(init);
+    registerProtocolHandler();
     defer text_draw.reset();
     defer mf_lazy.unloadIfStarted();
     _ = win.CoCreateInstance(
@@ -22525,7 +22587,7 @@ fn updateCardVisible(a: *const App) bool {
 }
 
 fn updateCardNotesHeight(a: *const App) i32 {
-    if ((a.update_card_error_source == .message_read or a.update_card_error_source == .chats_read) and a.update_card_error_len > 0) return 0;
+    if ((a.update_card_error_source == .message_read or a.update_card_error_source == .chats_read or a.update_card_error_source == .deep_link) and a.update_card_error_len > 0) return 0;
     const pending = a.update_pending orelse return 0;
     const hwnd = a.hwnd orelse return 0;
     const hdc = win.GetDC(hwnd) orelse return 0;
@@ -22608,6 +22670,10 @@ fn updateCardFail(a: *App, text: []const u8) void {
 }
 
 fn updateCardClick(a: *App) void {
+    if (a.update_card_error_source == .deep_link and a.update_card_error_len > 0) {
+        clearDeepLinkProblem(a);
+        return;
+    }
     if (a.update_card_error_source == .chats_read and a.update_card_error_len > 0) {
         a.chats_read_attempts = 0;
         a.chats_read_retry_ticks = 0;
@@ -22638,6 +22704,10 @@ fn updateCardClick(a: *App) void {
 }
 
 fn updateCardDismiss(a: *App) void {
+    if (a.update_card_error_source == .deep_link and a.update_card_error_len > 0) {
+        clearDeepLinkProblem(a);
+        return;
+    }
     if (a.update_card_error_source == .chats_read and a.update_card_error_len > 0) {
         clearChatsReadProblem(a);
         return;
@@ -22651,6 +22721,300 @@ fn updateCardDismiss(a: *App) void {
     @memcpy(a.update_dismissed[0..n], pending.tag[0..n]);
     a.update_dismissed_len = n;
     updateCardRefresh(a);
+}
+
+fn showDeepLinkProblem(a: *App, text: []const u8) void {
+    setStatus(a, text);
+    a.update_card_error_source = .deep_link;
+    const n = @min(text.len, a.update_card_error.len);
+    @memcpy(a.update_card_error[0..n], text[0..n]);
+    a.update_card_error_len = n;
+    updateCardRefresh(a);
+}
+
+fn clearDeepLinkProblem(a: *App) void {
+    if (a.update_card_error_source != .deep_link) return;
+    a.update_card_error_len = 0;
+    a.update_card_error_source = .update;
+    updateCardRefresh(a);
+}
+
+fn regSetWide(key: win.HKEY, name: ?[*:0]const u16, value: [:0]const u16) void {
+    _ = win.RegSetValueExW(key, name, 0, win.REG_SZ, @ptrCast(value.ptr), @intCast((value.len + 1) * @sizeOf(u16)));
+}
+
+fn registerProtocolHandler() void {
+    var exe: [519]u16 = undefined;
+    const exe_len: usize = @intCast(win.GetModuleFileNameW(null, &exe, exe.len));
+    if (exe_len == 0 or exe_len >= exe.len) return;
+    const hkcu = winHandle(win.HKEY, 0x80000001);
+    var root: win.HKEY = null;
+    if (win.RegCreateKeyExW(hkcu, lit("Software\\Classes\\postbox"), 0, null, 0, win.KEY_SET_VALUE, null, &root, null) != win.ERROR_SUCCESS) return;
+    defer _ = win.RegCloseKey(root);
+    regSetWide(root, null, std.unicode.utf8ToUtf16LeStringLiteral(deep_link.protocol_description));
+    regSetWide(root, lit("URL Protocol"), std.unicode.utf8ToUtf16LeStringLiteral(""));
+    var icon_buf: [540]u16 = undefined;
+    if (deep_link.formatRegistryIcon(&icon_buf, exe[0..exe_len])) |icon_val| {
+        var icon_key: win.HKEY = null;
+        if (win.RegCreateKeyExW(hkcu, lit("Software\\Classes\\postbox\\DefaultIcon"), 0, null, 0, win.KEY_SET_VALUE, null, &icon_key, null) == win.ERROR_SUCCESS) {
+            defer _ = win.RegCloseKey(icon_key);
+            regSetWide(icon_key, null, icon_val);
+        }
+    }
+    var cmd_buf: [540]u16 = undefined;
+    if (deep_link.formatRegistryCommand(&cmd_buf, exe[0..exe_len])) |cmd_val| {
+        var cmd_key: win.HKEY = null;
+        if (win.RegCreateKeyExW(hkcu, lit("Software\\Classes\\postbox\\shell\\open\\command"), 0, null, 0, win.KEY_SET_VALUE, null, &cmd_key, null) == win.ERROR_SUCCESS) {
+            defer _ = win.RegCloseKey(cmd_key);
+            regSetWide(cmd_key, null, cmd_val);
+        }
+    }
+}
+
+const LinkCall = struct {
+    url: []u8,
+    event: win.HANDLE,
+    state: std.atomic.Value(u8) = .init(control_call_posted),
+};
+
+fn linkCallDestroy(a: *App, call: *LinkCall) void {
+    a.allocator.free(call.url);
+    _ = win.CloseHandle(call.event);
+    a.allocator.destroy(call);
+}
+
+fn linkThreadMain(a: *App) void {
+    control_pipe.serveWithPrefix(deep_link.pipe_prefix, a.allocator, a, linkHandle);
+}
+
+fn linkHandle(context: *anyopaque, line: []const u8, out: *std.Io.Writer.Allocating) void {
+    const a: *App = @ptrCast(@alignCast(context));
+    const trimmed = std.mem.trim(u8, line, " \t\r\n");
+    if (!deep_link.isPostboxUrl(trimmed)) {
+        out.writer.writeAll("invalid\n") catch |err| {
+            var buffer: [96]u8 = undefined;
+            appendLaunchLog(a, std.fmt.bufPrint(&buffer, "deep-link: invalid reply failed: {s}", .{@errorName(err)}) catch "deep-link: invalid reply failed");
+        };
+        return;
+    }
+    const hwnd = a.hwnd orelse return;
+    const event = win.CreateEventW(null, win.FALSE, win.FALSE, null) orelse return;
+    const copy = a.allocator.dupe(u8, trimmed) catch {
+        _ = win.CloseHandle(event);
+        return;
+    };
+    const call = a.allocator.create(LinkCall) catch {
+        a.allocator.free(copy);
+        _ = win.CloseHandle(event);
+        return;
+    };
+    call.* = .{ .url = copy, .event = event };
+    var owned = true;
+    defer if (owned) linkCallDestroy(a, call);
+    switch (control_pipe.callUi(hwnd, wm_open_link, call, call.event, control_ui_reply_timeout_ms)) {
+        .gone => return,
+        .timeout => {
+            if (call.state.cmpxchgStrong(control_call_posted, control_call_abandoned, .acq_rel, .acquire) == null) {
+                owned = false;
+                return;
+            }
+            control_pipe.waitForever(call.event);
+        },
+        .done => {},
+    }
+    out.writer.writeAll("ok\n") catch |err| {
+        var buffer: [96]u8 = undefined;
+        appendLaunchLog(a, std.fmt.bufPrint(&buffer, "deep-link: ok reply failed: {s}", .{@errorName(err)}) catch "deep-link: ok reply failed");
+    };
+}
+
+fn linkOnUi(a: *App, call: *LinkCall) void {
+    openDeepLink(a, call.url);
+    if (call.state.cmpxchgStrong(control_call_posted, control_call_answered, .acq_rel, .acquire) == null) {
+        _ = win.SetEvent(call.event);
+    } else linkCallDestroy(a, call);
+}
+
+fn bringWindowToFront(a: *App) void {
+    const hwnd = a.hwnd orelse return;
+    if (win.IsIconic(hwnd) != 0) _ = win.ShowWindow(hwnd, win.SW_RESTORE);
+    _ = win.SetForegroundWindow(hwnd);
+}
+
+const KnownLinkChat = struct {
+    key: chat_key.Stored = .{},
+    view_account: Utf8Text(32) = .{},
+    archived: bool = false,
+};
+
+fn findKnownLinkChat(a: *App, target: *const deep_link.Target) ?KnownLinkChat {
+    for (a.chats[0..a.chat_count]) |*chat| {
+        if (deep_link.matchesChat(target, chat.provider, chat.account.slice(), chat.view_account.slice(), chat.jid.slice())) {
+            var found = KnownLinkChat{ .archived = chat.archived };
+            found.key.set(chat_key.of(chat));
+            found.view_account.set(chatViewKey(chat).account);
+            return found;
+        }
+    }
+    if (a.chats_raw) |raw| {
+        if (std.json.parseFromSlice(std.json.Value, a.allocator, raw, .{})) |parsed| {
+            defer parsed.deinit();
+            if (parsed.value == .object) {
+                if (parsed.value.object.get("data")) |data_val| {
+                    if (data_val == .array) {
+                        for (data_val.array.items) |item| {
+                            if (item != .object) continue;
+                            const object = item.object;
+                            const provider = if (unifiedHub(a)) hub.sourceProvider(object) orelse continue else .whatsapp;
+                            const account = if (unifiedHub(a)) hub.sourceAccount(object, a.cache_tag.slice()) else a.cache_tag.slice();
+                            const jid = getString(object, "jid");
+                            const view_account = if (unifiedHub(a)) deep_link.viewAccountFor(provider, getString(object, "account"), jid, a.cache_tag.slice()) else a.cache_tag.slice();
+                            if (!deep_link.matchesChat(target, provider, account, view_account, jid)) continue;
+                            const key = chat_key.Key{ .provider = provider, .account = account, .id = jid };
+                            var archived = if (a.archive_state) |state| state.isArchived(key, getBool(object, "archived")) else getBool(object, "archived");
+                            for (a.pending_archives[0..a.pending_archive_count]) |*pending| {
+                                const pending_key = chat_key.Key{ .provider = .whatsapp, .account = account, .id = pending.jid.slice() };
+                                if (provider == .whatsapp and chat_key.Key.eql(key, pending_key)) archived = archive_state.visibleArchived(archived, pending.state);
+                            }
+                            var found = KnownLinkChat{ .archived = archived };
+                            found.key.set(key);
+                            found.view_account.set(view_account);
+                            return found;
+                        }
+                    }
+                }
+            }
+        } else |_| appendLaunchLog(a, "deep-link: failed to scan chats snapshot");
+    }
+    if (!unifiedHub(a) and target.provider == .slack) {
+        for (&a.slack_installations) |*installation| {
+            if (!installation.active) continue;
+            for (installation.chats[0..installation.chat_count]) |*chat| {
+                if (!deep_link.matchesChat(target, .slack, chat.account.slice(), chat.view_account.slice(), chat.jid.slice())) continue;
+                const archived = if (a.archive_state) |state| state.localArchived(chat_key.of(chat)) else false;
+                var found = KnownLinkChat{ .archived = archived };
+                found.key.set(chat_key.of(chat));
+                found.view_account.set(chatViewKey(chat).account);
+                return found;
+            }
+        }
+    }
+    return null;
+}
+
+fn openDeepLink(a: *App, raw_url: []const u8) void {
+    bringWindowToFront(a);
+    const target = deep_link.parse(raw_url) catch {
+        a.pending_deep_link.set("");
+        showDeepLinkProblem(a, deep_link.invalid_link_note);
+        return;
+    };
+    const known = findKnownLinkChat(a, &target) orelse {
+        if (!a.chats_loaded_once or wacliPendingGet(a, .chats) > 0) {
+            a.pending_deep_link.set(raw_url);
+            return;
+        }
+        a.pending_deep_link.set("");
+        showDeepLinkProblem(a, deep_link.missingChatNote(target.provider));
+        return;
+    };
+    a.pending_deep_link.set("");
+    clearDeepLinkProblem(a);
+    if (a.image_viewer_window != null) closeImageViewer(a);
+    if (a.palette != null) closePalette(a);
+    var visible_index = visibleChatIndex(a, known.key.key());
+    if (visible_index == null) {
+        a.search_query = .{};
+        a.unread_only = false;
+        if (known.archived and !(a.show_archived or (a.include_archived and activeChatView(a) == .all))) {
+            a.show_archived = true;
+        } else if (!known.archived and a.show_archived) {
+            a.show_archived = false;
+        }
+        const view_key = chat_key.Key{ .provider = known.key.provider, .account = known.view_account.slice(), .id = known.key.key().id };
+        if (!chatInView(a, view_key)) {
+            a.view_selected[@intFromEnum(messenger_view.View.all)] = known.key;
+            switchChatView(a, .all);
+        }
+        refreshVisibleChats(a);
+        visible_index = visibleChatIndex(a, known.key.key());
+    }
+    const index = visible_index orelse {
+        showDeepLinkProblem(a, deep_link.missingChatNote(target.provider));
+        return;
+    };
+    if (target.message_len > 0) {
+        a.pending_link_target = target;
+        a.pending_link_chat.set(chat_key.of(&a.chats[index]));
+    } else {
+        a.pending_link_target = null;
+        a.pending_link_chat = .{};
+    }
+    if (index != a.selected_chat or !chat_key.Key.eql(chat_key.displayed(a), chat_key.of(&a.chats[index]))) {
+        controlSelectIndex(a, index);
+    } else if (a.pending_link_target != null) {
+        applyPendingLinkMessage(a, false);
+    }
+    appendLaunchLog(a, "deep-link: opened chat");
+}
+
+fn processPendingDeepLink(a: *App, chats_final: bool) void {
+    if (chats_final) a.chats_loaded_once = true;
+    if (a.pending_deep_link.len == 0) return;
+    var url_copy = Utf8Text(511){};
+    url_copy.set(a.pending_deep_link.slice());
+    openDeepLink(a, url_copy.slice());
+}
+
+fn applyPendingLinkMessage(a: *App, fresh_read: bool) void {
+    const target = a.pending_link_target orelse return;
+    if (a.selected_chat >= a.chat_count) return;
+    const chat = &a.chats[a.selected_chat];
+    const open_key = chat_key.of(chat);
+    if (!chat_key.Key.eql(open_key, a.pending_link_chat.key()) or !chat_key.Key.eql(chat_key.displayed(a), a.pending_link_chat.key())) return;
+    const canvas = a.canvas orelse return;
+    var client: win.RECT = undefined;
+    if (win.GetClientRect(canvas, &client) == 0 or client.bottom <= client.top) return;
+    for (a.messages[0..a.message_count], 0..) |*message, index| {
+        if (!deep_link.matchesMessage(&target, message.id.slice())) continue;
+        if (channelMessageVisible(a, message)) {
+            a.selected_message = index;
+            a.reply_flash.set(message.id.slice());
+            scrollToSelectedMessage(a);
+            _ = win.InvalidateRect(canvas, null, win.FALSE);
+            if (a.hwnd) |hwnd| _ = win.SetTimer(hwnd, timer_reply_flash, 1500, null);
+        } else {
+            const parent_id = if (slack.isThreadReply(message.id.slice(), message.thread_ts.slice()))
+                message.thread_ts.slice()
+            else
+                localThreadRoot(a, message) orelse message.id.slice();
+            var parent_index: ?usize = null;
+            for (a.messages[0..a.message_count], 0..) |*candidate, candidate_idx| {
+                if (std.mem.eql(u8, candidate.id.slice(), parent_id)) {
+                    parent_index = candidate_idx;
+                    break;
+                }
+            }
+            if (parent_index) |pidx| {
+                a.selected_message = pidx;
+                a.reply_flash.set(parent_id);
+                scrollToSelectedMessage(a);
+                _ = win.InvalidateRect(canvas, null, win.FALSE);
+                if (a.hwnd) |hwnd| _ = win.SetTimer(hwnd, timer_reply_flash, 1500, null);
+                openSlackThread(a, pidx);
+            }
+        }
+        a.pending_link_target = null;
+        a.pending_link_chat = .{};
+        return;
+    }
+    if (!fresh_read) return;
+    if (unifiedHub(a) and target.provider == .whatsapp and !hubOlderFor(a, open_key).exhausted and a.message_count < max_messages) {
+        requestHubOlder(a);
+        return;
+    }
+    a.pending_link_target = null;
+    a.pending_link_chat = .{};
 }
 
 fn migrateProductName(init: std.process.Init) void {
@@ -22842,7 +23206,7 @@ fn paintBulkStrip(a: *App, shapes: *const smooth.Context, hdc: win.HDC) void {
 fn paintUpdateCard(a: *App, shapes: *const smooth.Context, hdc: win.HDC) void {
     if (!updateCardVisible(a)) return;
     const pending_tag = if (a.update_pending) |pending| pending.tag else "";
-    const pending_notes = if ((a.update_card_error_source == .message_read or a.update_card_error_source == .chats_read) and a.update_card_error_len > 0) "" else if (a.update_pending) |pending| pending.notes else "";
+    const pending_notes = if ((a.update_card_error_source == .message_read or a.update_card_error_source == .chats_read or a.update_card_error_source == .deep_link) and a.update_card_error_len > 0) "" else if (a.update_pending) |pending| pending.notes else "";
     const card = updateCardRect(a);
     smooth.fillRoundRect(shapes, card, px(a, theme.radius_card * 2), px(a, theme.radius_card * 2), theme.current.surface_container_low);
     smooth.strokeRoundRect(shapes, card, px(a, theme.radius_card * 2), px(a, theme.radius_card * 2), theme.current.outline, 1);
@@ -22856,6 +23220,8 @@ fn paintUpdateCard(a: *App, shapes: *const smooth.Context, hdc: win.HDC) void {
         "Chats unavailable"
     else if (failed and a.update_card_error_source == .message_read)
         "Messages unavailable"
+    else if (failed and a.update_card_error_source == .deep_link)
+        "Chat not found"
     else if (failed)
         "Update failed"
     else if (a.update_card_busy)
@@ -22894,12 +23260,19 @@ fn paintUpdateCard(a: *App, shapes: *const smooth.Context, hdc: win.HDC) void {
 
     if (busy) return;
 
-    var close_rc = updateCardCloseRect(a, card);
-    _ = win.SelectObject(hdc, @ptrCast(a.font_small.?));
-    _ = win.SetTextColor(hdc, theme.current.on_surface_variant);
-    drawAscii(hdc, &close_rc, "Later", win.DT_SINGLELINE | win.DT_VCENTER | win.DT_CENTER | win.DT_NOPREFIX);
+    if (a.update_card_error_source != .deep_link) {
+        var close_rc = updateCardCloseRect(a, card);
+        _ = win.SelectObject(hdc, @ptrCast(a.font_small.?));
+        _ = win.SetTextColor(hdc, theme.current.on_surface_variant);
+        drawAscii(hdc, &close_rc, "Later", win.DT_SINGLELINE | win.DT_VCENTER | win.DT_CENTER | win.DT_NOPREFIX);
+    }
 
-    const label: []const u16 = if (failed) std.unicode.utf8ToUtf16LeStringLiteral("Retry") else std.unicode.utf8ToUtf16LeStringLiteral("Restart");
+    const label: []const u16 = if (failed and a.update_card_error_source == .deep_link)
+        std.unicode.utf8ToUtf16LeStringLiteral("Dismiss")
+    else if (failed)
+        std.unicode.utf8ToUtf16LeStringLiteral("Retry")
+    else
+        std.unicode.utf8ToUtf16LeStringLiteral("Restart");
     paintRoundedButton(a, shapes, hdc, updateCardButtonRect(a, card), if (theme.choice == .amoled) theme.amoled_send else theme.current.primary, if (theme.choice == .amoled) theme.send_text else theme.current.on_primary, a.font_bold.?, if (theme.choice == .amoled) theme.current.outline else null, label);
 }
 
@@ -25544,4 +25917,5 @@ fn applyHubOlderPage(a: *App, result: *const WacliResult) void {
         pending.set(a.pending_reply_jump.slice());
         if (jumpToReply(a, pending.slice())) a.pending_reply_jump.set("") else requestHubOlder(a);
     }
+    if (a.pending_link_target != null) applyPendingLinkMessage(a, true);
 }

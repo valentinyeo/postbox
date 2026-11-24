@@ -111,6 +111,7 @@ The registry records existing journeys, not proof that a journey ran. GAP means 
 | `chat-list-formatting` | `src:chat-lists` | chat-lists | covered |
 | `slack-threads` | `src:slack-threads` | slack-threads | covered |
 | `real-size-inbox` | `tools/verify-wazig/real_size_seed.py` | real-size | covered |
+| `deep-links` | `src/deep_link.zig` | deep-links | covered |
 | `exit_record` | `reportPreviousExit` | exit-record | covered |
 
 ## Journey: real-size
@@ -136,6 +137,26 @@ The evidence validator compares the logged `seeded_*` counts with the seed's own
 Postbox currently retains at most 1,000 loaded messages per chat. This journey pages from the latest 80 messages to that limit and checks the oldest retained message is painted. It does not claim to reach the first of all 1,600 seeded messages. Voice and image downloads reuse the valid Ogg fixture and generated PNG; no audio device is needed because this journey opens voice notes without playing them.
 
 The planted patch drops the older-history cursor from message requests. The busy-top step must fail while the seed remains unchanged. Patch application can be checked locally; clean and planted app execution require Windows CI.
+
+## Journey: deep-links
+
+### Sub-features
+
+Registers the per-user `postbox://` URL protocol handler in Windows registry, routes WhatsApp links (`postbox://whatsapp/<account>/<chat>[/<msg>]`) by account and chat id, routes Slack links (`postbox://slack/<team>/<channel>[/<ts>]`) by workspace, channel and message timestamp (including permalink `p`-prefixed timestamps), forwards links to an already-running Postbox window, opens links after cold-starting a closed Postbox, scrolls to named messages, and displays a non-modal "Chat not found" card without altering selection, view, search, scroll or draft when a link names a missing chat.
+
+### How to get to it (user POV)
+
+Open a `postbox://whatsapp/...` or `postbox://slack/...` link from Chrome or Windows Shell. If Postbox is running, it switches directly to that chat and scrolls to any named message. If Postbox is closed, it launches and then switches to that chat and message. If the link names a chat that is not in Postbox, a dismissible sidebar note appears and the open chat and draft stay untouched.
+
+### Driving it with PowerShell UI Automation
+
+Run `gh workflow run verify.yml -f feature=deep-links`. The registry starts `DeepLinksHandler` and drives `journey-deep-links.ps1` on Windows. It checks the isolated `postbox` protocol registration keys, invokes `Messages.exe` with a WhatsApp business link (distinguished from a personal chat with the same contact), invokes a Slack workspace/channel/timestamp link and verifies the target message is selected and scrolled into the visible canvas, invokes a missing-chat link after typing a composer draft and verifies the visible note and unchanged state, dismisses the note, quits Postbox, and launches Postbox cold with a WhatsApp link naming an older message.
+
+### Gotchas
+
+In verification runs, `prepareVerification` overrides `HKEY_CURRENT_USER` to `HKCU\Software\MessagesVerification\<id>`, so registering `Software\Classes\postbox` stays completely isolated from the host registry. Forwarding a link to a running instance checks the `LOCALAPPDATA`-keyed single-instance mutex before registry setup and sends the URL over the `USERNAME`-scoped `\\.\pipe\postbox-link-<user>` pipe.
+
+The planted patch removes the WhatsApp account check from `matchesChat` in `src/deep_link.zig` so a business link opens the personal chat for the same contact first. The WhatsApp business step must fail on Windows CI.
 
 ## Journey: dictation-live
 

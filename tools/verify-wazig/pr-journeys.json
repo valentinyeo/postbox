@@ -441,6 +441,18 @@
     "tools/verify-wazig/evidence-real-size.py": [
       "real-size"
     ],
+    "src/deep_link": [
+      "deep-links"
+    ],
+    "tools/verify-wazig/journey-deep-links.ps1": [
+      "deep-links"
+    ],
+    "tools/verify-wazig/deep-links-fixture.py": [
+      "deep-links"
+    ],
+    "tools/verify-wazig/check-deep-links-evidence.py": [
+      "deep-links"
+    ],
     "tools/verify-wazig/journey-dictation-live.ps1": [
       "dictation-live"
     ],

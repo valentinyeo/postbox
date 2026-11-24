@@ -6,7 +6,11 @@ pub const max_request_bytes: usize = 64 * 1024;
 pub const max_response_bytes: usize = 16 * 1024 * 1024;
 
 pub fn pipeName(buffer: *[200]u16) ?[:0]const u16 {
-    const prefix = std.unicode.utf8ToUtf16LeStringLiteral(control.pipe_prefix);
+    return pipeNameWithPrefix(control.pipe_prefix, buffer);
+}
+
+pub fn pipeNameWithPrefix(comptime prefix_utf8: []const u8, buffer: *[200]u16) ?[:0]const u16 {
+    const prefix = std.unicode.utf8ToUtf16LeStringLiteral(prefix_utf8);
     const rest = buffer[prefix.len..];
     const user_len = win.GetEnvironmentVariableW(std.unicode.utf8ToUtf16LeStringLiteral("USERNAME"), rest.ptr, @intCast(rest.len));
     if (user_len == 0 or user_len >= rest.len) return null;
@@ -19,8 +23,12 @@ pub fn pipeName(buffer: *[200]u16) ?[:0]const u16 {
 pub const Handler = *const fn (context: *anyopaque, line: []const u8, out: *std.Io.Writer.Allocating) void;
 
 pub fn serve(allocator: std.mem.Allocator, context: *anyopaque, handler: Handler) void {
+    serveWithPrefix(control.pipe_prefix, allocator, context, handler);
+}
+
+pub fn serveWithPrefix(comptime prefix_utf8: []const u8, allocator: std.mem.Allocator, context: *anyopaque, handler: Handler) void {
     var name_buffer: [200]u16 = undefined;
-    const name = pipeName(&name_buffer) orelse return;
+    const name = pipeNameWithPrefix(prefix_utf8, &name_buffer) orelse return;
     while (true) {
         const pipe = win.CreateNamedPipeW(
             name.ptr,
@@ -46,6 +54,36 @@ pub fn serve(allocator: std.mem.Allocator, context: *anyopaque, handler: Handler
             thread.detach();
         } else |_| job.run();
     }
+}
+
+pub fn sendLineWithPrefix(comptime prefix_utf8: []const u8, text: []const u8, wait_ms: u32) bool {
+    var name_buffer: [200]u16 = undefined;
+    const name = pipeNameWithPrefix(prefix_utf8, &name_buffer) orelse return false;
+    const deadline = win.GetTickCount64() + wait_ms;
+    var handle: win.HANDLE = win.INVALID_HANDLE_VALUE;
+    while (true) {
+        const opened = win.CreateFileW(name.ptr, win.GENERIC_READ | win.GENERIC_WRITE, 0, null, win.OPEN_EXISTING, control.client_open_flags, null);
+        if (opened != win.INVALID_HANDLE_VALUE and opened != null) {
+            handle = opened;
+            break;
+        }
+        const err = win.GetLastError();
+        if (win.GetTickCount64() >= deadline) return false;
+        if (err == win.ERROR_PIPE_BUSY) {
+            _ = win.WaitNamedPipeW(name.ptr, 500);
+        } else if (err == win.ERROR_FILE_NOT_FOUND) {
+            win.Sleep(200);
+        } else {
+            return false;
+        }
+    }
+    defer _ = win.CloseHandle(handle);
+    writeAll(handle, text);
+    writeAll(handle, "\n");
+    var reply: [256]u8 = undefined;
+    var got: win.DWORD = 0;
+    _ = win.ReadFile(handle, &reply, reply.len, &got, null);
+    return true;
 }
 
 const Connection = struct {

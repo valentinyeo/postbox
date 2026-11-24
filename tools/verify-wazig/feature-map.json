@@ -757,6 +757,13 @@
       "why": ""
     },
     {
+      "feature": "deep-links",
+      "source": "src/deep_link.zig",
+      "proof": "deep-links",
+      "status": "covered",
+      "why": ""
+    },
+    {
       "feature": "exit_record",
       "source": "reportPreviousExit",
       "proof": "exit-record",
