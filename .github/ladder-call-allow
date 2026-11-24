@@ -1,1 +1,5 @@
-tools/verify-wazig/verifier.py:verifier needs a model family other than the DeepSeek authors; Token Ladder serves only DeepSeek:2026-12-31
+tools/check-ladder-calls.py:this is the scanner rule table; the provider patterns are data, not calls:2027-06-30
+tools/test-check-ladder-calls.sh:these are the scanner's own expected matches; fixtures, not calls:2027-06-30
+tools/test_voice_language.py:asserts the product formatter host as evidence; no model call:2027-06-30
+tools/verify-wazig/check-voice-language.py:asserts the product formatter host as evidence; no model call:2027-06-30
+tools/verify-wazig/verifier.py:the free Groq judge must come from a family the author did not use; the ladder has no Groq lane and this repo holds no ladder lane key:2027-06-30

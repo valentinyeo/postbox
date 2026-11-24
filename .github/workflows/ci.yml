@@ -23,6 +23,9 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: No direct model calls
+        uses: valentinyeo/token-ladder/.github/actions/lint-direct-model-calls@main
+
       - name: No new code comments
         run: python3 tools/check_new_comments.py
 
