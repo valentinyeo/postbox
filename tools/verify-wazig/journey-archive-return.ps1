@@ -25,8 +25,18 @@ $null = Wait-Until {
 Send-Keys $session '^+e'
 $null = Wait-Until { (Read-Control $session status).pending_archives -eq 0 -and -not ((Read-Control $session chats).chats.id -contains $target.id) } 'archive-return chat kept' 60
 $null = Invoke-RestMethod -Method Post -Uri "$($session.bridge_url)/fixture/notification-archived" -Headers $headers -Body '{}' -ContentType 'application/json'
-Start-Sleep -Seconds 10
+$null = Wait-Until { (Read-Control $session chats).chats.id -contains 'business:notification-archived@s.whatsapp.net' } 'archive-return unkept archived chat returned' 60
+$pullsBefore = @(Read-BridgeRequests $session | Where-Object { $_.path.StartsWith('/v1/wazig/chats') -and $_.status -eq 200 }).Count
+$null = Invoke-RestMethod -Method Post -Uri "$($session.bridge_url)/fixture/notification-inbox" -Headers $headers -Body '{}' -ContentType 'application/json'
+$null = Wait-Until { @(Read-BridgeRequests $session | Where-Object { $_.path.StartsWith('/v1/wazig/chats') -and $_.status -eq 200 }).Count -gt $pullsBefore } 'archive-return kept chat newer message pulled' 60
 Invoke-PaletteCommand $session 'Refresh'
-Assert-That (-not ((Read-Control $session chats).chats.id -contains $target.id)) 'archive-return kept chat came back'
+$null = Wait-Until {
+    $archived = @((Read-Control $session chats -Arguments @('--archived')).chats | Where-Object { $_.id -eq $target.id -and $_.archived -eq $true })
+    $inbox = @((Read-Control $session chats).chats | Where-Object { $_.id -eq $target.id })
+    $archived.Count -eq 1 -or $inbox.Count -ge 1
+} 'archive-return kept chat settled' 60
+$keptInArchive = @((Read-Control $session chats -Arguments @('--archived')).chats | Where-Object { $_.id -eq $target.id -and $_.archived -eq $true }).Count -eq 1
+$keptInInbox = @((Read-Control $session chats).chats | Where-Object { $_.id -eq $target.id }).Count -ge 1
+Assert-That ($keptInArchive -and -not $keptInInbox) 'archive-return kept chat came back'
 Hub-Pass $session kept-stays
 $null = Invoke-RestMethod -Method Post -Uri "$($session.bridge_url)/fixture/notification-clear" -Headers $headers -Body '{}' -ContentType 'application/json'
