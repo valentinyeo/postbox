@@ -35,6 +35,8 @@
 - Windows acceptance does not prove page loading.
 - Loopback requests may come from link previews.
 - Browser associations and certificates remain unchanged.
+- A runner without a default browser answers a launch with the Windows app picker.
+- The picker owns the keyboard, so the journey cancels it and takes the app back.
 - Missing browser support makes dispatch inconclusive.
 - The historical baseline had a sampling race.
 - Its quote result is not clean red.

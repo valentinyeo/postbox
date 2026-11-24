@@ -776,6 +776,40 @@ class InlineLinksChecksTests(unittest.TestCase):
         wait = text.index("'fixture reply painted again'", press)
         self.assertLess(wait, text.index("$reply = Get-InlineRow $session 'INLINE-REPLY'", ctrl_o))
 
+    def test_scroll_steps_reclaim_the_app_before_pressing_again(self):
+        text = (ROOT / 'tools/verify-wazig/journey-inline-links.ps1').read_text()
+        for label, key in (("'fixture fallback quote painted'", '0x22'),
+                           ("'fixture reply painted again'", '0x21')):
+            with self.subTest(step=label):
+                wait = text.index(label)
+                block = text[text.rindex('Wait-Until {', 0, wait):wait]
+                press = block.index(f'[InlineLinksNative]::Press({key})')
+                self.assertIn('Focus-InlineApp $session', block[:press])
+
+    def test_a_launched_url_releases_the_foreground_before_the_next_step(self):
+        journey = (ROOT / 'tools/verify-wazig/journey-inline-links.ps1').read_text()
+        click = journey.split('function Invoke-InlineClick', 1)[1].split('function Get-InlineRow', 1)[0]
+        receipt = click.index('Wait-InlineReceipt $Session ($receiptsBefore + 1) $Url')
+        dismiss = click.index('Clear-InlineLauncher $Session', receipt)
+        self.assertLess(dismiss, click.index('Focus-InlineApp $Session', dismiss))
+
+    def test_foreground_launcher_dismissal_leaves_the_app_and_shell_alone(self):
+        native = (ROOT / 'tools/verify-wazig/inline-links-native.cs').read_text()
+        helper = native.split('public static string DismissForegroundLauncher(int pid, long appStartTicks)', 1)[1].split('\n    }', 1)[0]
+        self.assertIn('GetForegroundWindow', helper)
+        self.assertIn('PostMessageW', helper)
+        self.assertIn('0x0010', helper)
+        self.assertIn('VirtualKeyEscape', helper)
+        self.assertIn('const ushort VirtualKeyEscape = 0x1B;', native)
+        self.assertIn('Array.IndexOf(ShellWindows, cls) >= 0', helper)
+        shell_classes = native.split('string[] ShellWindows = {', 1)[1].split('};', 1)[0]
+        for window_class in ('Progman', 'WorkerW', 'Shell_TrayWnd', 'Shell_SecondaryTrayWnd'):
+            self.assertIn(f'"{window_class}"', shell_classes)
+        self.assertIn('owner == pid', helper)
+        self.assertIn('ProcessStartTicks(owner) > appStartTicks', helper)
+        self.assertIn('Clear-InlineLauncher $Session', (ROOT / 'tools/verify-wazig/journey-inline-links.ps1').read_text())
+        self.assertIn('[long]$Session.startTicks', (ROOT / 'tools/verify-wazig/journey-inline-links.ps1').read_text())
+
     def test_slack_reads_the_visible_fallback_quote_because_thread_replies_are_hidden(self):
         text = (ROOT / 'tools/verify-wazig/journey-inline-links.ps1').read_text()
         self.assertIn("$quoteRowId = if ($case.provider -ceq 'slack') { 'INLINE-BLOCK' } else { 'INLINE-REPLY' }", text)
