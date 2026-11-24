@@ -107,6 +107,85 @@ pub fn sizeFromJson(object: std.json.ObjectMap) u64 {
 
 pub const AttachmentState = enum { local, downloading, oversized, unavailable, retry };
 
+pub const gone_status: u32 = 410;
+pub const gone_refresh_ms: u64 = 30_000;
+pub const note_repaint_gap_ms: u64 = 20_000;
+
+pub fn noteRepaintDue(last_ms: u64, now_ms: u64) bool {
+    return now_ms -| last_ms >= note_repaint_gap_ms;
+}
+
+pub const Finish = struct {
+    repaint: bool = false,
+    refresh: bool = false,
+    gone: bool = false,
+};
+
+pub fn finish(ok: bool, status: u32, attempts: u8) Finish {
+    if (ok) return .{ .repaint = true };
+    if (status != gone_status) return .{};
+    if (attempts == 0) return .{ .refresh = true };
+    return .{ .gone = true };
+}
+
+test "SOFT-3158 a 410 refreshes the link once, then stays final and repaints nothing" {
+    const first = finish(false, 410, 0);
+    try std.testing.expect(first.refresh and !first.gone and !first.repaint);
+    const again = finish(false, 410, 1);
+    try std.testing.expect(again.gone and !again.refresh and !again.repaint);
+    const later = finish(false, 410, 9);
+    try std.testing.expect(later.gone and !later.refresh and !later.repaint);
+    for ([_]*const Finish{ &first, &again, &later }) |outcome| try std.testing.expect(!outcome.repaint);
+}
+
+test "SOFT-3158 a live download still repaints and a transient failure only backs off" {
+    const ok = finish(true, 200, 0);
+    try std.testing.expect(ok.repaint and !ok.gone and !ok.refresh);
+    const ok_after_retries = finish(true, 200, 6);
+    try std.testing.expect(ok_after_retries.repaint and !ok_after_retries.gone);
+    for ([_]u32{ 404, 429, 500, 502, 0 }) |status| {
+        const failed = finish(false, status, 0);
+        try std.testing.expect(!failed.repaint and !failed.gone and !failed.refresh);
+    }
+}
+
+test "SOFT-3158 a burst of gone notes repaints three times a minute at most" {
+    var last: u64 = 0;
+    var now: u64 = 1_000_000;
+    var paints: usize = 0;
+    for (0..13) |_| {
+        if (noteRepaintDue(last, now)) {
+            last = now;
+            paints += 1;
+        }
+        now += 500;
+    }
+    try std.testing.expectEqual(@as(usize, 1), paints);
+    now = 1_000_000 + 60_000;
+    last = 0;
+    paints = 0;
+    while (now < 1_000_000 + 120_000) : (now += 500) {
+        if (noteRepaintDue(last, now)) {
+            last = now;
+            paints += 1;
+        }
+    }
+    try std.testing.expect(paints <= 3);
+}
+
+test "SOFT-3158 a gone key written to disk keeps the file final after a restart" {
+    const played = @import("played.zig");
+    var written: [24]u8 = undefined;
+    const key = played.Set.pairKey("chat@example.invalid", "expired-id");
+    const line = try std.fmt.bufPrint(&written, "{x:0>16}\n", .{key});
+    var stored = played.Set{};
+    stored.load(line);
+    var sentinel = ready(0);
+    sentinel.attempted = stored.wasPlayedRaw(key);
+    try std.testing.expectEqual(@as(?usize, null), selectNext(&.{sentinel}, 0));
+    try std.testing.expectEqual(@as(?usize, 0), selectNext(&.{ready(0)}, 0));
+}
+
 pub const hub_media_timeout_ms: u64 = 150_000;
 
 pub fn hubStalled(started_ms: u64, now_ms: u64) bool {
