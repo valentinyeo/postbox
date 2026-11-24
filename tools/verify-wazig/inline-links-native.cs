@@ -1,5 +1,7 @@
 using System;
+using System.Diagnostics;
 using System.Runtime.InteropServices;
+using System.Text;
 
 public static class InlineLinksNative {
     [StructLayout(LayoutKind.Sequential)] public struct Point { public int x, y; }
@@ -14,6 +16,11 @@ public static class InlineLinksNative {
     [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr window, out uint pid);
     [DllImport("user32.dll")] static extern bool GetCursorInfo(ref CursorInfo info);
     [DllImport("user32.dll", CharSet=CharSet.Unicode)] static extern IntPtr LoadCursorW(IntPtr instance, IntPtr name);
+    [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll")] static extern IntPtr GetAncestor(IntPtr window, uint flags);
+    [DllImport("user32.dll", CharSet=CharSet.Unicode)] static extern int GetWindowTextW(IntPtr window, StringBuilder text, int max);
+    [DllImport("user32.dll", CharSet=CharSet.Unicode)] static extern int GetClassNameW(IntPtr window, StringBuilder text, int max);
+    [DllImport("user32.dll")] static extern bool PostMessageW(IntPtr window, uint message, IntPtr wParam, IntPtr lParam);
     static Input MoveTo(int x, int y) {
         int width = GetSystemMetrics(78), height = GetSystemMetrics(79);
         if (width <= 1 || height <= 1) throw new Exception("Virtual screen unavailable");
@@ -37,6 +44,30 @@ public static class InlineLinksNative {
     public static void Press(ushort key) { Send(Key(key, 0, 0), Key(key, 0, 2)); }
     public static void Text(string text) {
         foreach (char ch in text) Send(Key(0, ch, 4), Key(0, ch, 6));
+    }
+    static string WindowText(IntPtr window) { var text = new StringBuilder(512); GetWindowTextW(window, text, text.Capacity); return text.ToString(); }
+    static string WindowClass(IntPtr window) { var text = new StringBuilder(256); GetClassNameW(window, text, text.Capacity); return text.ToString(); }
+    static string ProcessName(uint pid) { try { using (Process process = Process.GetProcessById((int)pid)) return process.ProcessName; } catch (Exception) { return ""; } }
+    static long ProcessStartTicks(uint pid) { try { using (Process process = Process.GetProcessById((int)pid)) return process.StartTime.ToUniversalTime().Ticks; } catch (Exception) { return long.MinValue; } }
+    static readonly string[] LauncherProcesses = { "OpenWith", "LaunchWinApp", "ApplicationFrameHost", "ShellExperienceHost" };
+    static readonly string[] LauncherTitles = { "select an app to open", "how do you want to open" };
+    const ushort VirtualKeyEscape = 0x1B;
+    static readonly string[] ShellWindows = { "Progman", "WorkerW", "Shell_TrayWnd", "Shell_SecondaryTrayWnd" };
+    public static string DismissForegroundLauncher(int pid, long appStartTicks) {
+        IntPtr root = GetAncestor(GetForegroundWindow(), 2);
+        if (root == IntPtr.Zero) return "";
+        uint owner; GetWindowThreadProcessId(root, out owner);
+        if (owner == pid) return "";
+        string cls = WindowClass(root);
+        if (Array.IndexOf(ShellWindows, cls) >= 0) return "";
+        string title = WindowText(root);
+        string name = ProcessName(owner);
+        bool launcher = ProcessStartTicks(owner) > appStartTicks || Array.IndexOf(LauncherProcesses, name) >= 0;
+        if (!launcher) launcher = title.Length > 0 && Array.Exists(LauncherTitles, word => title.ToLowerInvariant().Contains(word));
+        if (!launcher) return "";
+        Send(Key(VirtualKeyEscape, 0, 0), Key(VirtualKeyEscape, 0, 2));
+        PostMessageW(root, 0x0010, IntPtr.Zero, IntPtr.Zero);
+        return cls + " [" + name + "]: " + title;
     }
     public static long[] Cursor() {
         var info = new CursorInfo { size = Marshal.SizeOf(typeof(CursorInfo)) };

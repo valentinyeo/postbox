@@ -15,6 +15,11 @@ function Get-InlineApp($Session) {
     } 'inline links app window'
 }
 
+function Clear-InlineLauncher($Session) {
+    $closed = [InlineLinksNative]::DismissForegroundLauncher($Session.pid, [long]$Session.startTicks)
+    if ($closed) { Add-Content (Join-Path $Session.evidence 'actions.log') "Dismiss launcher: $closed" }
+}
+
 function Focus-InlineApp($Session) {
     $app = Get-InlineApp $Session
     $state = Read-Control $Session status
@@ -23,6 +28,7 @@ function Focus-InlineApp($Session) {
     $point.Y = [int](($state.composer.box.top + $state.composer.box.bottom) / 2)
     $null = [VerifyWindow]::ClientToScreen($app.MainWindowHandle, [ref]$point)
     $null = Wait-Until {
+        Clear-InlineLauncher $Session
         [InlineLinksNative]::Nudge($point.X, $point.Y)
         [VerifyWindow]::ForceForeground($app.MainWindowHandle) | Out-Null
         $foreground = [VerifyWindow]::GetForegroundWindow()
@@ -86,7 +92,11 @@ function Invoke-InlineClick($Session, [int]$X, [int]$Y, [string]$Name, [string]$
     } "handled canvas mouse-up $Name"
     $record = @{ name=$Name; point=@($X,$Y); end=@($endX,$Y); before=$before.canvas_up_count; jump_before=$before.reply_jump_count; ack=$ack.canvas_up_count; ack_point=$ack.canvas_up_point; receipts=@(Read-InlineReceipts $Session); status=$ack }
     $record | ConvertTo-Json -Depth 32 | Set-Content $path
-    if ($Url) { Wait-InlineReceipt $Session ($receiptsBefore + 1) $Url }
+    if ($Url) {
+        Wait-InlineReceipt $Session ($receiptsBefore + 1) $Url
+        Clear-InlineLauncher $Session
+        Focus-InlineApp $Session
+    }
     $record.receipts = @(Read-InlineReceipts $Session)
     $record | ConvertTo-Json -Depth 32 | Set-Content $path
     Assert-That ($record.receipts.Count -eq ($receiptsBefore + [int][bool]$Url)) "Unexpected dispatch count: $Name"
@@ -228,7 +238,12 @@ foreach ($case in $cases) {
         [InlineLinksNative]::Press(0x22)
         $null = Wait-Until {
             $row = @((Read-Control $session messages).messages | Where-Object id -CEQ 'INLINE-BLOCK')[0]
-            $row -and @($row.quote_fragments).Count -ge 2
+            $painted = $row -and @($row.quote_fragments).Count -ge 2
+            if (-not $painted) {
+                Focus-InlineApp $session
+                [InlineLinksNative]::Press(0x22)
+            }
+            $painted
         } 'fixture fallback quote painted'
         $blockShown = Read-Control $session messages
         $block = @($blockShown.messages | Where-Object id -CEQ 'INLINE-BLOCK')[0]
@@ -258,7 +273,12 @@ foreach ($case in $cases) {
         [InlineLinksNative]::Press(0x21)
         $null = Wait-Until {
             $row = @((Read-Control $session messages).messages | Where-Object id -CEQ 'INLINE-REPLY')[0]
-            $row -and @($row.quote_fragments).Count -gt 0
+            $painted = $row -and @($row.quote_fragments).Count -gt 0
+            if (-not $painted) {
+                Focus-InlineApp $session
+                [InlineLinksNative]::Press(0x21)
+            }
+            $painted
         } 'fixture reply painted again'
     }
     $reply = Get-InlineRow $session $quoteRowId
