@@ -182,6 +182,7 @@ function Get-App($Session) {
             ('check-wait', "Wait-Until { $false } 'playback advances' -Seconds 0", True),
             ('harness-wait', "Wait-Until { $false } 'tool listening' -Seconds 0 -Harness", False),
             ('crashed-app', "$env:DEAD_APP = 'true'; Assert-That $false 'app check'", False),
+            ('declared-exit', "$env:DEAD_APP = 'true'; Assert-That $false 'The exit wrote no record' -AppExited", True),
             ('caught-then-error', "try { Assert-That $false 'app check' } catch { }; throw 'unrelated crash'", False),
             ('caught-then-pass', "try { Assert-That $false 'app check' } catch { }", False),
         ]:
@@ -200,8 +201,16 @@ function Get-App($Session) {
                 if case == 'crashed-app':
                     self.assertIn('app check; app lookup failed: App disappeared', result.stdout)
                 if expected:
-                    name = 'playback advances' if case == 'check-wait' else 'Search order differs'
+                    name = {'check-wait': 'playback advances', 'declared-exit': 'The exit wrote no record'}.get(case, 'Search order differs')
                     self.assertEqual(marker.read_text(encoding='utf-8-sig').strip(), f'search: {name}')
+
+    def test_the_exit_record_checks_run_after_a_declared_exit(self):
+        journey = (TOOLS / 'journey-exit-record.ps1').read_text()
+        checked = [line for line in journey.splitlines() if line.startswith('Assert-That')]
+        after_exit = checked[checked.index("Assert-That ($closeIndex -ge 0) 'The close request was not logged' -AppExited"):]
+        for line in after_exit[:4]:
+            self.assertIn('-AppExited', line)
+        self.assertIn("-AppExited", (TOOLS / 'harness.ps1').read_text().split('function Assert-That(', 1)[1].split('\n}', 1)[0])
 
 
 class SidebarPlantedTests(unittest.TestCase):

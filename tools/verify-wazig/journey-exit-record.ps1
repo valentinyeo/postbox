@@ -16,12 +16,12 @@ for ($index = 0; $index -lt $lines.Count; $index++) {
     if ($lines[$index] -match '^\d+ shutdown: close requested uptime=\d+$') { $closeIndex = $index }
     if ($lines[$index] -match '^\d+ shutdown: clean exit code=0 reason=wm_close uptime=\d+$') { $exitIndex = $index }
 }
-Assert-That ($closeIndex -ge 0) 'The close request was not logged'
-Assert-That ($exitIndex -gt $closeIndex) 'The clean exit was not logged after its close request'
-Assert-That (Test-Path $recordPath) 'The exit wrote no record'
+Assert-That ($closeIndex -ge 0) 'The close request was not logged' -AppExited
+Assert-That ($exitIndex -gt $closeIndex) 'The clean exit was not logged after its close request' -AppExited
+Assert-That (Test-Path $recordPath) 'The exit wrote no record' -AppExited
 $record = (Get-Content $recordPath -Raw).Trim()
 $recordPattern = '^at=\d+ version=' + [regex]::Escape($session.expected_version) + ' reason=wm_close uptime=\d+ code=0$'
-Assert-That ($record -match $recordPattern) 'The exit record is malformed'
+Assert-That ($record -match $recordPattern) 'The exit record is malformed' -AppExited
 $start.Environment['WAZIG_VERIFY_RESTART'] = $session.id
 $app = [Diagnostics.Process]::Start($start)
 $session.pid = $app.Id
