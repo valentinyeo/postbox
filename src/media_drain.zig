@@ -108,7 +108,6 @@ pub fn sizeFromJson(object: std.json.ObjectMap) u64 {
 pub const AttachmentState = enum { local, downloading, oversized, unavailable, retry };
 
 pub const gone_status: u32 = 410;
-pub const gone_refresh_ms: u64 = 30_000;
 pub const note_repaint_gap_ms: u64 = 20_000;
 
 pub fn noteRepaintDue(last_ms: u64, now_ms: u64) bool {
@@ -117,35 +116,26 @@ pub fn noteRepaintDue(last_ms: u64, now_ms: u64) bool {
 
 pub const Finish = struct {
     repaint: bool = false,
-    refresh: bool = false,
     gone: bool = false,
 };
 
-pub fn finish(ok: bool, status: u32, attempts: u8) Finish {
+pub fn finish(ok: bool, status: u32) Finish {
     if (ok) return .{ .repaint = true };
     if (status != gone_status) return .{};
-    if (attempts == 0) return .{ .refresh = true };
     return .{ .gone = true };
 }
 
-test "SOFT-3158 a 410 refreshes the link once, then stays final and repaints nothing" {
-    const first = finish(false, 410, 0);
-    try std.testing.expect(first.refresh and !first.gone and !first.repaint);
-    const again = finish(false, 410, 1);
-    try std.testing.expect(again.gone and !again.refresh and !again.repaint);
-    const later = finish(false, 410, 9);
-    try std.testing.expect(later.gone and !later.refresh and !later.repaint);
-    for ([_]*const Finish{ &first, &again, &later }) |outcome| try std.testing.expect(!outcome.repaint);
+test "SOFT-3165 a gone file is asked for once and repaints nothing" {
+    const gone = finish(false, 410);
+    try std.testing.expect(gone.gone and !gone.repaint);
 }
 
 test "SOFT-3158 a live download still repaints and a transient failure only backs off" {
-    const ok = finish(true, 200, 0);
-    try std.testing.expect(ok.repaint and !ok.gone and !ok.refresh);
-    const ok_after_retries = finish(true, 200, 6);
-    try std.testing.expect(ok_after_retries.repaint and !ok_after_retries.gone);
+    const ok = finish(true, 200);
+    try std.testing.expect(ok.repaint and !ok.gone);
     for ([_]u32{ 404, 429, 500, 502, 0 }) |status| {
-        const failed = finish(false, status, 0);
-        try std.testing.expect(!failed.repaint and !failed.gone and !failed.refresh);
+        const failed = finish(false, status);
+        try std.testing.expect(!failed.repaint and !failed.gone);
     }
 }
 

@@ -90,22 +90,21 @@ test "success suppression and transient failures are not terminal failures" {
     try std.testing.expect(!mediaAttempted(&a, jid, id));
 }
 
-test "SOFT-3158 a gone file refreshes the link once then stops and is saved" {
+test "SOFT-3165 a gone file shows unavailable on its first 410 and is saved once" {
     var a = fixture();
     const jid = a.chats[0].jid.slice();
     const id = a.messages[0].id.slice();
     gone_saved = 0;
-    try std.testing.expect(!noteMediaFailureStatus(&a, jid, id, 410));
-    try std.testing.expect(!mediaUnavailable(&a, jid, id));
-    try std.testing.expectEqual(@as(u8, 1), a.media_failures[0].count);
-    try std.testing.expectEqual(@as(u64, 100_000 + media_drain.gone_refresh_ms), a.media_failures[0].retry_after_ms);
-    try std.testing.expectEqual(@as(usize, 0), gone_saved);
-    try std.testing.expect(!a.media_note_dirty);
     try std.testing.expect(noteMediaFailureStatus(&a, jid, id, 410));
     try std.testing.expect(mediaUnavailable(&a, jid, id));
     try std.testing.expectEqual(@as(u8, 0), a.media_failures[0].count);
     try std.testing.expectEqual(@as(usize, 1), gone_saved);
     try std.testing.expect(a.media_note_dirty);
+    try std.testing.expectEqual(media_drain.AttachmentState.unavailable, attachmentState(&a, &a.messages[0], false));
+    try std.testing.expect(noteMediaFailureStatus(&a, jid, id, 410));
+    try std.testing.expectEqual(@as(usize, 1), gone_saved);
+    try std.testing.expect(!noteMediaFailureStatus(&a, jid, id, 404));
+    try std.testing.expect(mediaUnavailable(&a, jid, id));
 }
 
 test "IGSH-1689 a server error backs off from five seconds" {
