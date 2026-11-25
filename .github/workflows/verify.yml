@@ -39,6 +39,7 @@ jobs:
     outputs:
       matrix: ${{ steps.matrix.outputs.matrix }}
       needed: ${{ steps.matrix.outputs.needed }}
+      visible: ${{ steps.matrix.outputs.visible }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -78,8 +79,10 @@ jobs:
               mapping = json.loads(Path('tools/verify-wazig/pr-journeys.json').read_text())
               files = subprocess.check_output(['git', 'diff', '--name-only', '--no-renames', '-z', os.environ['BASE_SHA'], 'HEAD']).decode().split('\0')
               needed = any(p.startswith(('src/', 'tools/verify-wazig/')) or p in ('build.zig', '.github/workflows/verify.yml') for p in files)
+              visible = any(p.startswith('src/') and not p.endswith('_test.zig') for p in files)
               with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
                   output.write(f'needed={str(needed).lower()}\n')
+                  output.write(f'visible={str(visible).lower()}\n')
               try:
                   names = plan_journeys(files, mapping, journeys)
               except ValueError as error:
@@ -101,6 +104,8 @@ jobs:
     if: ${{ (github.event_name != 'pull_request' || needs.plan.outputs.needed == 'true') && inputs.tag == '' && !startsWith(github.ref_name, 'verify-release/') }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: mlugg/setup-zig@v2
         with:
           version: ${{ env.BASE_ZIG_VERSION }}
@@ -111,6 +116,18 @@ jobs:
         with:
           name: Postbox-candidate
           path: zig-out/bin/
+      - name: Build the default-branch baseline for the before clip
+        if: ${{ github.event_name == 'pull_request' && needs.plan.outputs.visible == 'true' }}
+        run: |
+          git worktree add --detach baseline "${{ github.event.pull_request.base.sha }}"
+          cd baseline
+          zig build '-Dtarget=x86_64-windows-gnu' --release=small '-Dversion=${{ env.BASE_APP_VERSION }}' --prefix "$GITHUB_WORKSPACE/baseline-bin"
+      - name: Upload the default-branch baseline desktop
+        if: ${{ github.event_name == 'pull_request' && needs.plan.outputs.visible == 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: Postbox-baseline
+          path: baseline-bin/bin/
   native-tests:
     runs-on: windows-latest
     timeout-minutes: 15
@@ -133,7 +150,7 @@ jobs:
     needs: [plan, candidate]
     if: ${{ !cancelled() && needs.plan.result == 'success' && (github.event_name != 'pull_request' || needs.plan.outputs.needed == 'true') && needs.candidate.result != 'failure' }}
     runs-on: windows-latest
-    timeout-minutes: ${{ github.event_name == 'pull_request' && 20 || 60 }}
+    timeout-minutes: ${{ github.event_name == 'pull_request' && 40 || 60 }}
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
@@ -262,6 +279,12 @@ jobs:
         run: |
           if (-not (Test-Path zig-out/bin/Messages.exe)) { throw 'Shared candidate build is missing Messages.exe' }
           'VERIFY_VERSION=${{ env.BASE_APP_VERSION }}' >> $env:GITHUB_ENV
+      - name: Download the default-branch baseline desktop
+        if: ${{ github.event_name == 'pull_request' && inputs.tag == '' && needs.plan.outputs.visible == 'true' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: Postbox-baseline
+          path: baseline-bin/bin
       - name: Download published release
         if: ${{ inputs.tag != '' || startsWith(github.ref_name, 'verify-release/') }}
         shell: pwsh
@@ -473,9 +496,22 @@ jobs:
           'ORIGINAL_CHAT_BUBBLE_RED_OK' | Add-Content verification-evidence/icon-red-control.txt
           exit 0
       - name: Install typing recorder
-        if: matrix.feature == 'drafts' || matrix.feature == 'media-fit'
+        if: ${{ (github.event_name == 'pull_request' && needs.plan.outputs.visible == 'true') || matrix.feature == 'drafts' || matrix.feature == 'media-fit' }}
         shell: pwsh
         run: tools/verify-wazig/install-ffmpeg.ps1
+      - name: Record the before clip on the default branch
+        if: ${{ github.event_name == 'pull_request' && inputs.tag == '' && needs.plan.outputs.visible == 'true' }}
+        shell: pwsh
+        env:
+          FEATURE: ${{ matrix.feature }}
+          VERIFY_RECORD: '1'
+        run: |
+          try {
+            & tools/verify-wazig/run.ps1 -Feature $env:FEATURE -Bin baseline-bin/bin -Evidence verification-evidence/before -ExpectedVersion ${{ env.BASE_APP_VERSION }}
+          } catch {
+            Write-Host "The default branch stopped journey $env:FEATURE before its assertions: $($_.Exception.Message)"
+          }
+          exit 0
       - name: Launch, doctor and drive
         id: drive
         continue-on-error: true
@@ -484,6 +520,7 @@ jobs:
           REPEAT: ${{ inputs.repeat || '1' }}
           FEATURE: ${{ matrix.feature }}
           VALIDATE_EVIDENCE: ${{ matrix.evidence }}
+          VERIFY_RECORD: ${{ (github.event_name == 'pull_request' && needs.plan.outputs.visible == 'true') && '1' || '0' }}
         run: |
           if ($env:REPEAT -notmatch '^[1-3]$') { throw 'repeat must be 1, 2 or 3' }
           $failed = $false
@@ -585,6 +622,31 @@ jobs:
           name: verify-wazig-${{ matrix.feature }}
           path: verification-evidence/
           if-no-files-found: error
+      - name: Keep the before and after clips
+        if: always()
+        shell: pwsh
+        env:
+          FEATURE: ${{ matrix.feature }}
+        run: |
+          New-Item verify-video -ItemType Directory -Force | Out-Null
+          foreach ($stage in @('before', 'after')) {
+            $source = if ($stage -eq 'after') { 'verification-evidence/video.mp4' } else { 'verification-evidence/before/video.mp4' }
+            if (Test-Path -LiteralPath $source) { Copy-Item -LiteralPath $source "verify-video/$stage-$env:FEATURE.mp4" }
+          }
+      - name: Upload the before clip
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: verify-video-${{ matrix.feature }}-before
+          path: verify-video/before-${{ matrix.feature }}.mp4
+          if-no-files-found: ignore
+      - name: Upload the after clip
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: verify-video-${{ matrix.feature }}-after
+          path: verify-video/after-${{ matrix.feature }}.mp4
+          if-no-files-found: ignore
   verify-verdict:
     name: verify-verdict
     if: ${{ always() && github.event_name == 'pull_request' }}

@@ -128,6 +128,22 @@ try {
         $null = Wait-Until { (Read-Control $session status).chat_count -eq $journey.chats } 'hub chat list'
     }
     if ($journey.ready) { . (Join-Path $PSScriptRoot $journey.ready) }
+    $recorder = $null
+    $recorderLog = Join-Path $Evidence 'video-recorder.log'
+    if ($env:VERIFY_RECORD -eq '1') {
+        try {
+            $recorderStart = [Diagnostics.ProcessStartInfo]::new((Get-Command ffmpeg -ErrorAction Stop).Source)
+            $recorderStart.UseShellExecute = $false
+            $recorderStart.RedirectStandardInput = $true
+            $recorderStart.RedirectStandardError = $true
+            foreach ($argument in @('-y', '-loglevel', 'error', '-f', 'gdigrab', '-framerate', '10', '-i', 'desktop', '-t', '20', '-an', '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '30', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', (Join-Path $Evidence 'video.mp4'))) {
+                $recorderStart.ArgumentList.Add($argument)
+            }
+            $recorder = [Diagnostics.Process]::Start($recorderStart)
+        } catch {
+            "video recorder unavailable: $($_.Exception.Message)" | Set-Content $recorderLog
+        }
+    }
     Invoke-Doctor $session
     'JOURNEY STARTED' | Set-Content (Join-Path $Evidence 'journey-started.txt')
     $window = Get-Window $session
@@ -142,6 +158,19 @@ try {
         }
     } finally {
         $script:JourneyCheckSession = $null
+        if ($null -ne $recorder) {
+            try {
+                if (-not $recorder.HasExited) { $recorder.StandardInput.WriteLine('q') }
+                if (-not $recorder.WaitForExit(20000)) { $recorder.Kill(); $recorder.WaitForExit() }
+                $recorder.StandardError.ReadToEnd() | Add-Content $recorderLog
+                $clip = Join-Path $Evidence 'video.mp4'
+                if (-not (Test-Path -LiteralPath $clip) -or (Get-Item -LiteralPath $clip).Length -lt 1000) {
+                    'video recorder wrote no clip' | Add-Content $recorderLog
+                }
+            } catch {
+                "video recorder stop failed: $($_.Exception.Message)" | Add-Content $recorderLog
+            }
+        }
     }
     if (Test-Path -LiteralPath $checkMarker) { Remove-Item -LiteralPath $checkMarker -Force }
     $final = Read-Control $session status
