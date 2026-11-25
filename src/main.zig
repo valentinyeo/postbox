@@ -7345,7 +7345,8 @@ fn noteMediaFailureStatus(a: *App, jid: []const u8, id: []const u8, status: u32)
             break;
         }
     }
-    const decision = media_drain.finish(false, status, failures);
+    const decision = media_drain.finish(false, status);
+    const already_unavailable = mediaUnavailable(a, jid, id);
     failures +%= 1;
     const retry_limit: u8 = if (mediaTransientStatus(status)) max_transient_media_retries else max_media_retries;
     if (decision.gone or failures >= retry_limit) {
@@ -7354,13 +7355,13 @@ fn noteMediaFailureStatus(a: *App, jid: []const u8, id: []const u8, status: u32)
             entry.count = 0;
         }
         markMediaUnavailable(a, jid, id);
-        if (decision.gone) {
+        if (decision.gone and !already_unavailable) {
             saveMediaGone(a, jid, id);
             a.media_note_dirty = true;
         }
         return decision.gone;
     }
-    const retry_after_ms = win.GetTickCount64() + if (decision.refresh) media_drain.gone_refresh_ms else mediaRetryDelayMs(status, failures);
+    const retry_after_ms = win.GetTickCount64() + mediaRetryDelayMs(status, failures);
     if (matched) |entry| {
         entry.count = failures;
         entry.retry_after_ms = retry_after_ms;
