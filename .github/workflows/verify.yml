@@ -110,7 +110,7 @@ jobs:
               output.write(f'matrix={value}\n')
   candidate:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: ${{ needs.plan.outputs.video == 'true' && 25 || 15 }}
     needs: [plan]
     if: ${{ (github.event_name != 'pull_request' || needs.plan.outputs.needed == 'true') && inputs.tag == '' && !startsWith(github.ref_name, 'verify-release/') }}
     steps:
@@ -129,8 +129,16 @@ jobs:
           path: zig-out/bin/
       - name: Build the default-branch baseline for the before clip
         if: ${{ needs.plan.outputs.video == 'true' }}
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
-          git worktree add --detach baseline "${{ github.event.pull_request.base.sha }}"
+          ref="$BASE_SHA"
+          if [ -z "$ref" ]; then
+            git fetch --no-tags --depth=1 origin "$DEFAULT_BRANCH"
+            ref=$(git rev-parse FETCH_HEAD)
+          fi
+          git worktree add --detach baseline "$ref"
           cd baseline
           zig build '-Dtarget=x86_64-windows-gnu' --release=small '-Dversion=${{ env.BASE_APP_VERSION }}' --prefix "$GITHUB_WORKSPACE/baseline-bin"
       - name: Upload the default-branch baseline desktop
