@@ -81,9 +81,10 @@ class JourneyRegistryTests(unittest.TestCase):
                                 text=True, env=env)
         self.assertEqual(result.returncode, 0, result.stderr)
         outputs = dict(line.split('=', 1) for line in output.read_text().splitlines())
-        self.assertEqual(set(outputs), {'matrix', 'needed', 'visible'})
+        self.assertEqual(set(outputs), {'matrix', 'needed', 'visible', 'video'})
         self.assertEqual(outputs['needed'], 'true')
         self.assertEqual(outputs['visible'], 'true')
+        self.assertEqual(outputs['video'], 'true')
         names = {row['feature'] for row in json.loads(outputs['matrix'])['include']}
         self.assertEqual(names, {'search', 'voice', 'reply', 'paste-image'})
         mapping_path = self.tools / 'pr-journeys.json'

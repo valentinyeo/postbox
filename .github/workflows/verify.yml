@@ -18,6 +18,10 @@ on:
         description: Published release to verify instead of building
         type: string
         default: ''
+      record:
+        description: Record before and after clips even when no app source changed
+        type: string
+        default: ''
   schedule:
     - cron: "40 2 * * *"
 
@@ -40,6 +44,7 @@ jobs:
       matrix: ${{ steps.matrix.outputs.matrix }}
       needed: ${{ steps.matrix.outputs.needed }}
       visible: ${{ steps.matrix.outputs.visible }}
+      video: ${{ steps.matrix.outputs.video }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -61,6 +66,7 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           FEATURE: ${{ inputs.feature || (github.event_name == 'push' && 'voice' || 'search') }}
+          RECORD: ${{ inputs.record || '' }}
         run: |
           import json
           import os
@@ -73,6 +79,8 @@ jobs:
 
           journeys = json.loads(Path('tools/verify-wazig/journeys.json').read_text())['journeys']
           feature = os.environ['FEATURE']
+          record = os.environ.get('RECORD') == '1'
+          visible = False
           if os.environ['EVENT_NAME'] == 'schedule' or feature == 'all':
               selected = journeys
           elif os.environ['EVENT_NAME'] == 'pull_request':
@@ -92,6 +100,9 @@ jobs:
               selected = [row for row in journeys if row['name'] == feature]
               if not selected:
                   raise SystemExit(f"Unknown verification journey: {feature}. See tools/verify-wazig/journeys.json")
+          if record or os.environ['EVENT_NAME'] == 'pull_request':
+              with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+                  output.write(f"video={str(visible or record).lower()}\n")
           matrix = {'include': [{'feature': row['name'], 'evidence': row['evidence']} for row in selected]}
           value = json.dumps(matrix, separators=(',', ':'))
           print(value)
@@ -117,13 +128,13 @@ jobs:
           name: Postbox-candidate
           path: zig-out/bin/
       - name: Build the default-branch baseline for the before clip
-        if: ${{ github.event_name == 'pull_request' && needs.plan.outputs.visible == 'true' }}
+        if: ${{ needs.plan.outputs.video == 'true' }}
         run: |
           git worktree add --detach baseline "${{ github.event.pull_request.base.sha }}"
           cd baseline
           zig build '-Dtarget=x86_64-windows-gnu' --release=small '-Dversion=${{ env.BASE_APP_VERSION }}' --prefix "$GITHUB_WORKSPACE/baseline-bin"
       - name: Upload the default-branch baseline desktop
-        if: ${{ github.event_name == 'pull_request' && needs.plan.outputs.visible == 'true' }}
+        if: ${{ needs.plan.outputs.video == 'true' }}
         uses: actions/upload-artifact@v4
         with:
           name: Postbox-baseline
@@ -280,7 +291,7 @@ jobs:
           if (-not (Test-Path zig-out/bin/Messages.exe)) { throw 'Shared candidate build is missing Messages.exe' }
           'VERIFY_VERSION=${{ env.BASE_APP_VERSION }}' >> $env:GITHUB_ENV
       - name: Download the default-branch baseline desktop
-        if: ${{ github.event_name == 'pull_request' && inputs.tag == '' && needs.plan.outputs.visible == 'true' }}
+        if: ${{ inputs.tag == '' && needs.plan.outputs.video == 'true' }}
         uses: actions/download-artifact@v4
         with:
           name: Postbox-baseline
@@ -496,11 +507,11 @@ jobs:
           'ORIGINAL_CHAT_BUBBLE_RED_OK' | Add-Content verification-evidence/icon-red-control.txt
           exit 0
       - name: Install typing recorder
-        if: ${{ (github.event_name == 'pull_request' && needs.plan.outputs.visible == 'true') || matrix.feature == 'drafts' || matrix.feature == 'media-fit' }}
+        if: ${{ needs.plan.outputs.video == 'true' || matrix.feature == 'drafts' || matrix.feature == 'media-fit' }}
         shell: pwsh
         run: tools/verify-wazig/install-ffmpeg.ps1
       - name: Record the before clip on the default branch
-        if: ${{ github.event_name == 'pull_request' && inputs.tag == '' && needs.plan.outputs.visible == 'true' }}
+        if: ${{ inputs.tag == '' && needs.plan.outputs.video == 'true' }}
         shell: pwsh
         env:
           FEATURE: ${{ matrix.feature }}
@@ -520,7 +531,7 @@ jobs:
           REPEAT: ${{ inputs.repeat || '1' }}
           FEATURE: ${{ matrix.feature }}
           VALIDATE_EVIDENCE: ${{ matrix.evidence }}
-          VERIFY_RECORD: ${{ (github.event_name == 'pull_request' && needs.plan.outputs.visible == 'true') && '1' || '0' }}
+          VERIFY_RECORD: ${{ needs.plan.outputs.video == 'true' && '1' || '0' }}
         run: |
           if ($env:REPEAT -notmatch '^[1-3]$') { throw 'repeat must be 1, 2 or 3' }
           $failed = $false
