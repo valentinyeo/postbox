@@ -546,5 +546,49 @@ class JourneyReportTests(unittest.TestCase):
         self.assertIn('the plan matrix was unreadable', ' '.join(notes))
 
 
+class VideoTests(unittest.TestCase):
+    def needs(self, visible):
+        return {'plan': {'result': 'success', 'outputs': {'needed': 'true', 'visible': visible}},
+                'verify': {'result': 'success', 'outputs': {}}}
+
+    def test_each_visible_journey_links_its_before_and_after_clip(self):
+        clips = {'search': {'before': 'https://github.test/runs/7/artifacts/11',
+                            'after': 'https://github.test/runs/7/artifacts/12'}}
+        lines, notes = MODULE.video_report(self.needs('true'), ['search'], clips)
+        self.assertEqual(lines, ['- `search`: before https://github.test/runs/7/artifacts/11 - after '
+                                'https://github.test/runs/7/artifacts/12'])
+        self.assertEqual(notes, [])
+        text = MODULE.render('PASS', [], 'openai/gpt-oss-120b', 'abc', 'https://github.test/runs/7', [], lines)
+        self.assertIn('### Video', text)
+        self.assertIn('before https://github.test/runs/7/artifacts/11 - after '
+                      'https://github.test/runs/7/artifacts/12', text)
+
+    def test_no_visible_change_says_no_video(self):
+        lines, notes = MODULE.video_report(self.needs('false'), ['search'], {})
+        self.assertEqual((lines, notes), ([MODULE.NO_VIDEO], []))
+        text = MODULE.render('PASS', [], None, 'abc', 'https://github.test/runs/7',
+                             [('search', 'passed', '')], lines)
+        self.assertIn('### Video\n' + MODULE.NO_VIDEO, text)
+
+    def test_a_visible_change_without_a_clip_is_not_a_silent_pass(self):
+        lines, notes = MODULE.video_report(self.needs('true'), ['search'], {})
+        self.assertEqual(lines, ['- `search`: no clip recorded'])
+        self.assertEqual(MODULE.with_coverage('PASS', [], notes)[0], 'PASS+NOTES')
+
+    def test_clip_artifacts_pair_before_and_after_by_journey(self):
+        listed = ('verify-video-search-before\t11\nverify-video-search-after\t12\n'
+                  'verify-wazig-search\t13\nverify-video-voice-after\t14\n')
+        found = MODULE.video_artifacts('o/r', 'https://github.test/runs/7', fetch=lambda *args: listed)
+        self.assertEqual(found['search'], {'before': 'https://github.test/runs/7/artifacts/11',
+                                          'after': 'https://github.test/runs/7/artifacts/12'})
+        self.assertEqual(found['voice'], {'after': 'https://github.test/runs/7/artifacts/14'})
+        self.assertEqual(MODULE.video_artifacts('o/r', ''), {})
+
+        def broken(*args):
+            raise subprocess.CalledProcessError(1, 'gh')
+
+        self.assertEqual(MODULE.video_artifacts('o/r', 'https://github.test/runs/7', fetch=broken), {})
+
+
 if __name__ == '__main__':
     unittest.main()

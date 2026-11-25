@@ -40,6 +40,8 @@ JOURNEY_FOLDER = 'verify-wazig-'
 JOURNEY_PASSED = 'JOURNEY PASSED:'
 JOURNEY_SKILL = '/verify-wazig'
 JOURNEY_MAP = Path(__file__).resolve().parent / 'pr-journeys.json'
+VIDEO_ARTIFACT = re.compile(r'^verify-video-(.+)-(before|after)$')
+NO_VIDEO = 'No visible change, no video.'
 TIMEOUT = 'Timed out:'
 FAILURE_EVIDENCE = ('failure.txt:', 'journey-check-failed.txt:')
 MAX_FILE = 600
@@ -384,6 +386,47 @@ def journeys_for(path, mapping):
     return [name for prefix, names in mapping.items() if path.startswith(prefix) for name in names]
 
 
+def visible_change(needs):
+    plan = needs.get('plan') or {}
+    return str((plan.get('outputs') or {}).get('visible')).lower() == 'true'
+
+
+def video_artifacts(repo, run_url, fetch=None):
+    match = re.search(r'/runs/([0-9]+)', run_url or '')
+    if not repo or not match:
+        return {}
+    try:
+        listed = (fetch or gh)('api', f'repos/{repo}/actions/runs/{match.group(1)}/artifacts', '--paginate', '--jq',
+                               '.artifacts[] | .name + "\\t" + (.id | tostring)')
+    except (subprocess.CalledProcessError, OSError):
+        return {}
+    found = {}
+    for line in listed.splitlines():
+        name, _, ident = line.partition('\t')
+        named = VIDEO_ARTIFACT.match(name.strip())
+        if named and ident.strip():
+            found.setdefault(named.group(1), {})[named.group(2)] = f'{run_url}/artifacts/{ident.strip()}'
+    return found
+
+
+def video_report(needs, selected, clips):
+    if not visible_change(needs):
+        return [NO_VIDEO], []
+    lines = []
+    notes = []
+    for feature in selected:
+        clip = clips.get(feature) or {}
+        if clip.get('before') and clip.get('after'):
+            lines.append(f'- `{feature}`: before {clip["before"]} - after {clip["after"]}')
+        else:
+            lines.append(f'- `{feature}`: no clip recorded')
+            notes.append(f'journey `{feature}` left no before and after clip, so its video is missing')
+    if not lines:
+        lines.append('- no journey ran, so no clip was recorded')
+        notes.append('no journey ran, so no before and after clip exists')
+    return lines, notes
+
+
 def journey_report(selected, folders, mapping, files, links, reason):
     lines = []
     notes = []
@@ -464,7 +507,7 @@ def judge(needs, body, pr_text, journeys, evidence, diff, key, post=http_post, s
     return result, notes, model
 
 
-def render(result, notes, model, sha, run_url, journeys=None):
+def render(result, notes, model, sha, run_url, journeys=None, video=None):
     judge_line = f'Judge: {model} (Groq, a family no author used)' if model else 'Judge: none (the job results decided)'
     body = [MARKER, '### Verifier verdict', '', result, '', f'Commit {sha}', judge_line]
     if run_url:
@@ -474,6 +517,9 @@ def render(result, notes, model, sha, run_url, journeys=None):
         body.append(f'- `{feature}`: {outcome}' + (f' - {link}' if link else ''))
     if not journeys:
         body.append('- none recorded')
+    if video:
+        body.extend(['', '### Video'])
+        body.extend(video)
     body.append('')
     body.extend(f'- {note}' for note in notes or ['No notes.'])
     return '\n'.join(body)[:60000] + '\n'
@@ -535,9 +581,11 @@ def main():
     journeys, missing = journey_report(selected, journey_lines(os.environ.get('EVIDENCE_DIR', 'evidence')),
                                        journey_map(), files, links, no_journey_reason(needs))
     coverage.extend(missing)
+    video, video_notes = video_report(needs, selected, video_artifacts(repo, run_url))
+    coverage.extend(video_notes)
     result, notes, model = judge(needs, body, pr_text, selected, evidence, diff, os.environ.get('VERDICT_API_KEY', ''))
     result, notes = with_coverage(result, notes, coverage)
-    text = render(result, notes, model, (pull.get('head') or {}).get('sha', ''), run_url, journeys)
+    text = render(result, notes, model, (pull.get('head') or {}).get('sha', ''), run_url, journeys, video)
     print(result + '\n\n' + text)
     summary = os.environ.get('GITHUB_STEP_SUMMARY')
     if summary:
