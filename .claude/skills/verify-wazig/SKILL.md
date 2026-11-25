@@ -3,7 +3,7 @@ name: verify-wazig
 description: Verify the Postbox native Windows desktop through real keyboard input and UI Automation on GitHub Actions; use for UI regressions, user journeys and screenshot evidence without real provider accounts.
 ---
 
-pstack: 0.15.43
+pstack: 0.15.48
 
 # Verify Postbox
 

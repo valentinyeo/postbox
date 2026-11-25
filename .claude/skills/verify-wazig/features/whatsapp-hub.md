@@ -30,7 +30,7 @@ Use the production hub backend against a synthetic authenticated bridge on the G
 - The fake emits reset ID 1, closes, and requires a reconnect with Last-Event-ID 1. After history is proven, a fixture-only HTTP trigger adds a message upstream. Require LIVE in live.messages.json and live.png, then a reconnect with Last-Event-ID 2.
 - Use Ctrl+K → Compose message, type Fixture outgoing and Enter. The fake accepts once but loses the first response; require a retry with the same 32-character client_id and exactly one accepted send.
 - Require a mark-read request for Alpha, media requests at the same path returning 202 then 200, and a durable cache file with the response SHA-256. Save sent.png.
-- Use Ctrl+K → Archive selected chat. Require one acknowledged `/v1/archive` POST for the archived chat (the direct-bridge run archives Alpha, the hub run archives Beta) and a one-chat sidebar in after.png, with no pending writes.
+- Use Ctrl+K → Archive selected chat. Require an acknowledged `/v1/archive` POST for the archived chat: exactly one in the hub run, which archives Beta, and at least one in the direct-bridge run, which archives Alpha. Then require a one-chat sidebar in after.png, with no pending writes.
 - Older history paging (IGSH-681) runs only through the unified `/v1/wazig` contract, see [hub](hub.md) `mixed-older-pages`; this legacy bridge journey requests only the newest page.
 - Every assertion prints `whatsapp-hub <gate> PASS`; misses fail the job. Preserve bridge-requests.jsonl, hub-proof.log, read-only snapshots, screenshots, final-data and cleanup.txt. check-evidence.py rechecks the artifacts, not merely the PASS lines.
 

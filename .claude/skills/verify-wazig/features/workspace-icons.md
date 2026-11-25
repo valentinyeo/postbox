@@ -5,7 +5,7 @@
 - `workspace-icon`: each Slack chat shows its workspace icon in the existing rounded provider badge, not in place of the main contact avatar.
 - `workspace-cache`: the avatar worker fetches once per team, saves the exact image bytes in the avatar cache, and reloads that cache on subsequent starts. Existing avatar expiry and negative-cache rules apply.
 - `letter-fallback`: while loading, on a missing icon or a failed request, Slack keeps the existing S badge. Telegram uses its blue paper-plane mark while provider marks are enabled and falls back to T when disabled (`hub.providerBadge`).
-- `signal-mark`: Signal shows a #3A76F0 circle with a white speech bubble and dashed outline through the same provider-mark renderer as WhatsApp; disabling the badge switch restores S.
+- `signal-mark`: Signal shows a #3A76F0 circle with a solid white speech bubble and a white tail stroke through the same provider-mark renderer as WhatsApp; disabling the badge switch restores S.
 - `whatsapp-mark`: WhatsApp shows a #25D366 circle with a smooth white phone handset. The default-on `igsh_604_workspace_icons` switch restores all previous letters when disabled.
 
 ## How to get to it (user POV)

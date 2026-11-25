@@ -229,7 +229,7 @@ for name in ['hub Slack history refreshes ordering after caching its last messag
              'account view history accepts source accounts without confusing the hub cache namespace']:
     assert f'test "{name}"' in reconcile, name
 sort_journey = (registry_path.parent / 'journey-slack-sort.ps1').read_text(encoding='utf-8')
-assert 'Send-Keys $session "$viewModifier$slackNumber"' in sort_journey and "else { '%' }" in sort_journey and 'Drive Alt+2' in sort_map
+assert 'Send-Keys $session "$viewModifier$slackNumber"' in sort_journey and "else { '%' }" in sort_journey and "IndexOf(@($views.provider), 'slack')" in sort_journey and 'Drive Alt+3' in sort_map
 assert "for keys in ['%2', '^{TAB}'" in validator
 signal = (skill / 'features/signal.md').read_text(encoding='utf-8')
 signal_journey = (root / 'tools/verify-wazig/signal.ps1').read_text(encoding='utf-8')

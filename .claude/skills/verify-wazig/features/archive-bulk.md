@@ -26,7 +26,7 @@ Preconditions: doctor passes; synthetic Alpha and Beta are unarchived in `verifi
 
 ## Gotchas
 
-- Failure messages include `bulk`; the original keyboard handler fails at `bulk: Ctrl+A in empty composer selected no chats` because composer focus always selects text.
-- This journey proves Ctrl+A from the empty composer, `Cancel selection`, Ctrl+E bulk archive, and, only when the combined inbox lists at least five chats (`journey-archive-bulk.ps1` skips the step otherwise), Ctrl+click to add chats, Shift+click for a range and Esc to clear the selection. It does not drive Ctrl+A from list focus or Ctrl+Shift+E on a selection. Those reuse existing production paths; the pure shortcut tests cover the focus decision.
+- Most failure messages start `bulk:`; the original keyboard handler fails at `bulk: Ctrl+A in empty composer selected no chats` because composer focus always selects text. The `Cancel selection` step is the exception: its message is `palette Cancel selection clears the selected chats`, which its own planted check matches exactly.
+- This journey proves Ctrl+A from the empty composer, `Cancel selection`, Ctrl+E bulk archive and a text select-all that keeps the text. The Ctrl+click, Shift+click range and Esc steps need a combined inbox with at least five chats; this fixture seeds two, so `journey-archive-bulk.ps1` skips them and only the pure shortcut tests cover those focus and selection decisions. It does not drive Ctrl+A from list focus or Ctrl+Shift+E on a selection.
 - All actions use the existing foreground-checked SendKeys or UI Automation focus. Provider reads and archive acknowledgements use the isolated fixture boundary; control status/chats and native text reads do not mutate app state.
 - No live delivery, font, scale, toolbar, media, updater or installed executable changes are involved.
