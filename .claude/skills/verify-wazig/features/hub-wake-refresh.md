@@ -2,7 +2,8 @@
 
 ## Sub-features
 
-- `sync-line`: the chat header shows `Up to date · <HH:MM>` once a chat pull has landed within the last three minutes, `Offline · last sync <HH:MM>` when the live connection is down and `Catching up…` before the first pull lands (`sync_line.classify` in `src/sync_line.zig`, `updateSyncLine` in `src/main.zig`).
+- `sync-line`: the chat header shows `Up to date · <HH:MM>` once a chat pull has landed within the last three minutes, `Offline · last sync <HH:MM>` once the live connection has dropped with at least one recorded failure, and `Catching up…` before the first pull lands (`sync_line.classify` in `src/sync_line.zig`, `updateSyncLine` in `src/main.zig`).
+- `reconnect-hold`: a live connection that drops for less than 3000 ms keeps the line it already shows, so a brief event-stream flap does not flicker to `Offline` (`sync_line.step` and `reconnect_quiet_ms` in `src/sync_line.zig`, `invalidateSyncLine` in `src/main.zig`). The journey's dropped stream outlasts that window, which is why it still reaches `Offline`.
 - `retry-backoff`: a dropped event stream reconnects after 1000 ms, then 2000, then 4000, and the table continues to 30 s (`src/sync_gate.zig:hub_reconnect_backoff_ms`); the journey requires those first three waits, each logged once (`hubReconnectWaitMs` in `src/sync_gate.zig`).
 - `wake-resume`: with SSE live events muted and a new fixture row only on the HTTP API, a Windows `WM_POWERBROADCAST` resume notification loads `POLL-ROW` within fifteen seconds.
 - `safety-poll`: with the same mute, after sixty-five seconds without SSE the app issues another authenticated `/v1/chats` pull and keeps messages current (`hubSafetyPollDue` in `src/sync_gate.zig`).

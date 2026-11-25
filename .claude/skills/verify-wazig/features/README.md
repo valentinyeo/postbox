@@ -18,7 +18,7 @@ The `workspace-icons` journey verifies rounded Slack workspace icon badges, the 
 
 ## Thirty-day source sweep
 
-Window: 2026-10-25 through 2026-11-24, ending at `1958669`. These are source dispositions, not live-pass results.
+Window: 2026-10-25 through 2026-11-25, ending at `a80b26f`. These are source dispositions, not live-pass results.
 
 | Recent change | Source | Journey or missing prerequisite |
 |---|---|---|
@@ -43,6 +43,10 @@ Window: 2026-10-25 through 2026-11-24, ending at `1958669`. These are source dis
 | `d506159`, `52bc120`: deletion and manual resend | `src/main.zig:applyHubDelete`, `src/main.zig:resendFailedMessage` | `hub` and `hub-fault` check exact request identities and restored failed bubbles. |
 | `500ddc4`, `460e2a0`: archive return and retained intent | `src/main.zig`, `src/archive_rules.zig:archiveState` | `archive-return`, `slack-archive`, `hub-archive` and `archive-inbox` retain their separate provider/local contracts. |
 | `b11fd97`, `521b4ab`, `727d046`: composer reveal, keyboard reply and chat-number keys | `src/main.zig:composeRevealTop`, `src/main.zig:startReply`, `src/shortcuts.zig` | `drafts`, `reply`, `ctrl-badges` and `notrap`; keyboard reply now checks the exact focused-message first line rather than nonempty text. |
+| `e4faa39`, `f1c00f9`, `4f396eb`: own messages carry WhatsApp ticks and a receipt no longer moves the chat | `src/main.zig:drawReadTicks`, `src/read_receipt.zig:status`, `src/message_layout.zig` | `read-ticks` requires the blue mark on an older read message while the newest stays delivered, the second grey tick on delivered, no ticks on Slack or a Signal group, and a scrolled-up hold chat whose top message moves at most two pixels when the receipt arrives. |
+| `d8f8d79`: the update check reads a published release file instead of the GitHub API | `src/update.zig:update_file_path`, `src/main.zig:checkForUpdate` | Unreachable in the desktop fixture, which suppresses update offers. `postbox-upgrade.yml` drives `tools/verify-wazig/fake-github-updates.py`; no registered journey covers the update card. |
+| `5df4dac`: a brief reconnect keeps the sync line it already shows | `src/sync_line.zig:step`, `src/main.zig:invalidateSyncLine` | `hub-wake-refresh` reads the label through a real dropped stream and requires the three retry waits; the reconnect window and the reduced repaint rectangle are not measured by a journey. |
+| `b657ed8`: an expired media link is refreshed once before its not-available note | `src/media_drain.zig:finish`, `src/main.zig:noteMediaFailureStatus` | `media-speed` asserts one 410 request and the note within 15 s. The app now re-requests the 410 after `gone_refresh_ms` (30 s) and throttles the note repaint, so that journey is red on the default branch; recorded in `features/media-speed.md`. |
 
 ## Recent changes coverage
 
@@ -81,7 +85,7 @@ These are source changes in the bounded history window, not claims of live verif
 - IGSH-532: legacy bridge account identity and foreign outbox adoption -> `whatsapp-hub` (asserts preferred synthetic namespace despite reversed account order, startup adopted send/reply exactly once, old journal removal and stable retry client_id)
 - IGSH-533: reaction chips do not overlap message text -> unreachable: a reaction-bearing rendered message plus chip/text geometry oracle is not seeded by menus; covered by tools/test_reaction_layout.py
 - IGSH-534: Dictate uses an icon inside the composer -> unreachable: glyph-shape/state instrumentation is absent from the journey, which checks only control bounds; covered by src/composer_button_test.zig in CI
-- IGSH-538: WhatsApp Status removed -> `palette` (asserts Status filter has zero real UIA rows and former sidebar control 1120 is absent, after a positive shortcut-row control)
+- IGSH-538: WhatsApp Status removed -> `palette` (asserts no row labelled `Status`, former sidebar control 1120 absent, after a positive shortcut-row control)
 - IGSH-542: one-box composer with bottom-anchored controls -> `drafts` (asserts box inset, icon/control alignment and one/three lines at wide/narrow sizes in both themes)
 - IGSH-545: row-sized paint buffers and brush-failure handling -> unreachable: native buffer-allocation and brush-failure instrumentation; covered by unfurl-verification's ISSUE-545 smooth_shapes raster test
 - IGSH-546: keep-archived verification fixture -> unreachable: no user-facing change (fixture provider reads/archive acknowledgements and retained archive transition evidence)

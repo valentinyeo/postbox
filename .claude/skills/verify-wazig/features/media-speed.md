@@ -5,7 +5,7 @@
 - `media-speed-ten-files`: opening a WhatsApp chat downloads six images and four voice notes, newest first, and all ten show within 15 seconds.
 - `media-speed-three-at-once`: the hub answers each file slowly (0.8 s) after a pending reply, so a one-at-a-time app cannot finish in time.
 - `media-speed-server-error`: one image first fails with a server error and shows after the short 5 second wait.
-- `media-speed-gone`: one file the server calls gone is asked for once and never shows as downloaded.
+- `media-speed-gone`: one file the server calls gone is asked for once by the journey, which requires it to stop showing as a spinning download within 15 seconds.
 
 - `playback-speed-commands`: Ctrl+K sets playback speed to 1.5x, 2x and 1x, checked through the audio status.
 
@@ -21,4 +21,6 @@ The journey also runs each playback speed command from Ctrl+K and saves the resu
 
 ## Gotchas
 
-The files are synthetic bytes, not real photos or audio. The 15 second limit runs from the first media request, so a slow history reply cannot hide a slow download. Look at `media-speed-done.png`, not only the exit status.
+The files are synthetic bytes, not real photos or audio. The 15 second limit is measured from the client timer that starts when the journey opens the chat, and the validator also reads the server clock that starts at the first media request, so a slow history reply cannot hide a slow download. Look at `media-speed-done.png`, not only the exit status.
+
+The gone file is the one open conflict. Since `b657ed8` the app re-requests a 410 link once after `gone_refresh_ms` (`src/media_drain.zig`) and throttles the not-available note repaint (`src/main.zig:7461`), so the single-request and 15 second assertions fail: the last default-branch nightly measured 28.83 s and a second 410 at 30.98 s. The journey keeps its assertion because the user-visible contract is an immediate not-available note; the app behaviour is reported as a product gap, not papered over here.

@@ -5,7 +5,7 @@
 - Opening a synthetic WhatsApp group automatically downloads landscape and portrait PNG attachments through the hub media route.
 - Every media hit rectangle stays inside its bubble content padding, never wider than the bubble or taller than the scaled 250 px design cap.
 - Matching screenshot colours stay inside the corresponding media and bubble rectangles.
-- Own single-line text reaching the time box has its timestamp below the text pixels, not painted over the last word.
+- Own single-line text reaching the time box has its timestamp in the header band above the bubble, clear of the last word: `media-fit.cs` fails when the time rect's bottom passes the bubble top, and `src/main.zig` ends both the sender and time rects at `bubble_top - px(a, 8)`.
 - Wide and narrow windows repeat all assertions; narrow bubble content must be narrower than the landscape decoded at the wide window, so raw-size painting cannot pass. A captioned oversize MP4 is always included.
 - Forwarded image, video and document captions, an uncaptioned image, a short forwarded message and a live forwarded photo keep their text and forwarded flag (`tools/verify-wazig/media-fit.ps1:40-61` and `:139-145`).
 

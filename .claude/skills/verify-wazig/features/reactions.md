@@ -12,7 +12,7 @@ Open a chat, right-click an incoming message bubble, then left-click the laughin
 
 ## Driving it with PowerShell UI Automation
 
-Run `feature=reactions` on GitHub-hosted Windows with `pwsh -NoProfile -File tools/verify-wazig/run.ps1 -Feature reactions`. Doctor must pass with the default AMOLED theme and saved-scale default. The unified fake hub serves one WhatsApp chat and one Slack chat, each with one incoming text message.
+Run `feature=reactions` on GitHub-hosted Windows with `pwsh -NoProfile -File tools/verify-wazig/run.ps1 -Feature reactions`. Doctor must pass with the default AMOLED theme and saved-scale default. The unified fake hub serves one WhatsApp chat and one Slack chat. Alpha holds one incoming message; Beta holds two incoming messages plus a friend's heart reaction row on the second.
 
 For each provider, search for its synthetic chat through Ctrl+F. Resolve the message canvas with UI Automation and find painted message text in the screenshot. Use real `SendInput` right-click input and wait for the process-owned `#32768` menu. Measure the menu window, native client origin and client height. Its four equal text rows, three eight-pixel separators and DPI-scaled 36-pixel reaction row determine the laughing-face center. Read its index from `quick_reactions` and check the exact U+1F602 mapping in `reactionForCommand`; never call an app setter or send WM_COMMAND.
 
