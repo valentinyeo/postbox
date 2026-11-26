@@ -1314,9 +1314,9 @@ TICK_CHATS = [
     dict(jid='ticks-late@s.whatsapp.net', name='Verification Late', provider='whatsapp', kind='direct', delivered_to=1, read_by=0, older_read_by=1),
     dict(jid='ticks-group@g.us', name='Verification Group', provider='whatsapp', kind='group', delivered_to=3, read_by=2),
     dict(jid='slack:fixture-ticks:channel', name='Verification Slack', provider='slack', kind='direct', delivered_to=1, read_by=1),
-    dict(jid='signal:ticks-contact', name='Verification Signal Contact', provider='signal', kind='direct', delivered_to=0, read_by=1),
+    dict(jid='signal:ticks-contact', name='Verification Signal Contact', provider='signal', kind='direct', delivered_to=1, read_by=1),
     dict(jid='signal:group:ticks-group', name='Verification Signal Crowd', provider='signal', kind='group', delivered_to=2, read_by=2),
-    dict(jid='telegram:user:ticks-contact', name='Verification Telegram Contact', provider='telegram', kind='direct', delivered_to=0, read_by=1),
+    dict(jid='telegram:user:ticks-contact', name='Verification Telegram Contact', provider='telegram', kind='direct', delivered_to=1, read_by=1),
     dict(jid='telegram:user:ticks-unread', name='Verification Telegram Fresh', provider='telegram', kind='direct', delivered_to=0, read_by=0),
     dict(jid='ticks-hold@s.whatsapp.net', name='Verification Hold', provider='whatsapp', kind='direct', delivered_to=1, read_by=0),
 ]

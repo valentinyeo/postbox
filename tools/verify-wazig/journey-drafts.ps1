@@ -158,9 +158,10 @@ $null = Wait-Until { (Read-Edit $compose) -eq "Verification draft`nsecond" } 'Sh
 Send-Keys $session '^a'
 Send-Keys $session 'Verification draft'
 Send-Keys $session '^{TAB}'
+$null = Wait-Until { (Read-Control $session status).selected.name -eq 'Verification Beta' } 'next chat selected'
 Assert-That ((Read-Edit $compose) -eq '') 'Draft leaked to the next chat'
 Send-Keys $session '^+{TAB}'
-$null = Wait-Until { (Read-Edit $compose) -eq 'Verification draft' } 'restored per-chat draft'
+$null = Wait-Until { $state = Read-Control $session status; $state.selected.name -eq 'Verification Alpha' -and (Read-Edit $compose) -eq 'Verification draft' } 'restored per-chat draft'
 $draft = Join-Path $messages 'drafts.json'
 $null = Wait-Until { (Test-Path $draft) -and (Get-Content $draft -Raw).Contains('Verification draft') } 'persisted draft'
 Copy-Item $draft (Join-Path $Evidence 'drafts.json')

@@ -20,6 +20,11 @@
     "reason": "These are historical build prerequisites; commit, tree, binary hashes and the actual rollback journey are checked separately."
   },
   {
+    "file": "caret.ps1",
+    "assertion": "(Read-Edit $edit).Contains('x')",
+    "reason": "This wait only gates the click-marker insertion; the following alignment assertion requires the exact marker index and the surrounding text unchanged."
+  },
+  {
     "file": "check-chat-rows.ps1",
     "assertion": "$LASTEXITCODE -ne 0",
     "reason": "These commands retrieve the historical renderer and run its geometry regression; they do not claim a desktop feature passed."
@@ -36,17 +41,17 @@
   },
   {
     "file": "harness.ps1",
+    "assertion": "$LASTEXITCODE -eq 0",
+    "reason": "This guards control-client execution or delegates to check-hub-views.py and check-workspace-icons.py; subsequent parsed state, identity partitions or screenshot pixels supply feature proof."
+  },
+  {
+    "file": "harness.ps1",
     "assertion": "$LASTEXITCODE -ne 0",
     "reason": "This guards control-client execution or delegates to check-hub-views.py and check-workspace-icons.py; subsequent parsed state, identity partitions or screenshot pixels supply feature proof."
   },
   {
     "file": "harness.ps1",
     "assertion": "$child.ExitCode -eq 0",
-    "reason": "This guards control-client execution or delegates to check-hub-views.py and check-workspace-icons.py; subsequent parsed state, identity partitions or screenshot pixels supply feature proof."
-  },
-  {
-    "file": "harness.ps1",
-    "assertion": "$LASTEXITCODE -eq 0",
     "reason": "This guards control-client execution or delegates to check-hub-views.py and check-workspace-icons.py; subsequent parsed state, identity partitions or screenshot pixels supply feature proof."
   },
   {
@@ -75,6 +80,11 @@
     "reason": "The recorder process exit only guards evidence capture; exact native draft text, UIA selection, geometry and screenshot comparisons assert the feature."
   },
   {
+    "file": "journey-hub-archive.ps1",
+    "assertion": "(Get-Content $log -Raw).Contains(\"notification: accepted chat=business:notification-$phase@s.whatsapp.net message=$id\")",
+    "reason": "The log line is matched verbatim with its chat identity and message id, so no other notification line can satisfy it."
+  },
+  {
     "file": "postbox-upgrade.ps1",
     "assertion": "$LASTEXITCODE -eq 0",
     "reason": "Installer and certificate commands are setup prerequisites; executable hashes, relaunch state and the retained upgrade evidence validate the outcome separately."
@@ -88,6 +98,11 @@
     "file": "run.ps1",
     "assertion": "$child.ExitCode -ne 0",
     "reason": "A nonzero exit is the expected result for deliberately unsafe launches; isolation guards and launch-guards.log corroborate rejection before desktop interaction."
+  },
+  {
+    "file": "slack-emoji.ps1",
+    "assertion": "$standard.reaction.Contains('🥲') -and $standard.reaction.Contains('🍵')",
+    "reason": "The reaction field carries a set of two fixture reactions; each exact glyph must appear and the same journey compares the whole set."
   },
   {
     "file": "telegram.ps1",

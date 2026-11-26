@@ -18,7 +18,7 @@ The `workspace-icons` journey verifies rounded Slack workspace icon badges, the 
 
 ## Thirty-day source sweep
 
-Window: 2026-10-25 through 2026-11-25, ending at `a80b26f`. These are source dispositions, not live-pass results.
+Window: 2026-10-25 through 2026-11-26, ending at `36122c5`. These are source dispositions, not live-pass results.
 
 | Recent change | Source | Journey or missing prerequisite |
 |---|---|---|
@@ -46,10 +46,11 @@ Window: 2026-10-25 through 2026-11-25, ending at `a80b26f`. These are source dis
 | `e4faa39`, `f1c00f9`, `4f396eb`: own messages carry WhatsApp ticks and a receipt no longer moves the chat | `src/main.zig:drawReadTicks`, `src/read_receipt.zig:status`, `src/message_layout.zig` | `read-ticks` requires the blue mark on an older read message while the newest stays delivered, the second grey tick on delivered, no ticks on Slack or a Signal group, and a scrolled-up hold chat whose top message moves at most two pixels when the receipt arrives. |
 | `d8f8d79`: the update check reads a published release file instead of the GitHub API | `src/update.zig:update_file_path`, `src/main.zig:checkForUpdate` | Unreachable in the desktop fixture, which suppresses update offers. `postbox-upgrade.yml` drives `tools/verify-wazig/fake-github-updates.py`; no registered journey covers the update card. |
 | `5df4dac`: a brief reconnect keeps the sync line it already shows | `src/sync_line.zig:step`, `src/main.zig:invalidateSyncLine` | `hub-wake-refresh` reads the label through a real dropped stream and requires the three retry waits; the reconnect window and the reduced repaint rectangle are not measured by a journey. |
-| `b657ed8`: an expired media link is refreshed once before its not-available note | `src/media_drain.zig:finish`, `src/main.zig:noteMediaFailureStatus` | `media-speed` asserts one 410 request and the note within 15 s. The app now re-requests the 410 after `gone_refresh_ms` (30 s) and throttles the note repaint, so that journey is red on the default branch; recorded in `features/media-speed.md`. |
+| `b657ed8`, `36122c5`: an expired media link is not retried, so its not-available note lands at once | `src/media_drain.zig:finish`, `src/main.zig:noteMediaFailureStatus` | `media-speed` asserts one 410 request and the note within 15 s. The 30 second refresh that `b657ed8` added left the row spinning for 28.83 s on the default-branch nightly; `36122c5` made the first 410 final, and the journey is green on the default branch again in the 2026-11-26 nightly. |
 
 ## Recent changes coverage
 
+- SOFT-3165: a file that expires on WhatsApp says so at once -> `media-speed` (asserts one 410 request for the gone file, its not-available note and one `gone-media.txt` line within 15 s, and no 30 second refresh retry)
 - SOFT-1936: open WhatsApp and Slack chats from Postbox links -> `deep-links` (asserts the isolated protocol registration, the business-versus-personal WhatsApp identity, the Slack message scrolled into the visible canvas, an unchanged draft and selection for a missing chat, and a cold start on an older message; the guide is the `Journey: deep-links` section of FEATURE-MAP.md)
 - SOFT-3112: the next start reports why Postbox closed -> `exit-record` (asserts a real window close, both shutdown log lines, the exit record file and its consumption by the restart)
 - SOFT-3122: dictation shows words while you speak -> `dictation-live` (asserts the interim fragment and its revision in the composer before CloseStream and one final consumption; the guide is the `Journey: dictation-live` section of FEATURE-MAP.md)

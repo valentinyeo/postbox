@@ -17,7 +17,7 @@
 ## Gotchas
 
 - This is not complete rollback proof.
-- Old writes remain unimplemented. Re-upgrade recovery is covered only by [hub-migration-crash](hub-migration-crash.md).
+- Old writes remain unimplemented. Re-upgrade recovery is covered by [hub-migration-crash](hub-migration-crash.md) and [hub-migration-before-rename](hub-migration-before-rename.md), which run the same re-upgrade script; the before-rename variant only changes the exit code and pending-journal checks.
 - Offline cleanup requires an isolated Actions runner.
 - Interrupted migration is covered by [hub-migration-crash](hub-migration-crash.md) and [hub-migration-before-rename](hub-migration-before-rename.md). Other crashes, capacity and allocator remain unimplemented.
 - Voice and full routing proof remain unimplemented.

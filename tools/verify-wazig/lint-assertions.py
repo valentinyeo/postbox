@@ -54,6 +54,36 @@ def assertions(text):
         yield text.count('\n', 0, match.start()) + 1, normalize(expression)
 
 
+def containment_only(expression):
+    text = expression.strip()
+    while text.startswith('('):
+        try:
+            inner, end = balanced(text, 0)
+        except ValueError:
+            return None
+        if end != len(text):
+            break
+        text = inner.strip()
+    if text.lower().startswith('-not ') or re.search(r'\s+-(?:and|or)\s+', text, re.I):
+        return None
+    call = re.search(r'(?i)\.contains\s*\(', text)
+    if call and re.fullmatch(r'(?i).+\.contains\s*\(.*\)', text):
+        head = text[:call.start()]
+        if head.startswith('('):
+            try:
+                _, end = balanced(text, 0)
+            except ValueError:
+                return None
+            if end != call.start():
+                return None
+        elif not re.fullmatch(r'\$[\w.]+', head):
+            return None
+        return 'containment alone'
+    if re.fullmatch(r'(?i).+\s+-c?like\s+["\']\*[^"\']*\*["\']', text):
+        return 'wildcard containment alone'
+    return None
+
+
 def proxy(expression):
     value = expression.lower().strip()
     while value.startswith('('):
@@ -74,6 +104,9 @@ def proxy(expression):
         return 'success flag alone'
     if re.fullmatch(r'-not\s+\$(?:error|errors|failed|haserror)|\$(?:error|errors)\.count\s+-eq\s+0|\$(?:error|errors)\s+-eq\s+\$null', value):
         return 'absence of errors alone'
+    containment = containment_only(expression)
+    if containment:
+        return containment
     if re.search(r'\b(?:read-edit|composer_text|\w*text\w*|preview)\b|\$(?:before|after)(?![\w.])', value) and not re.search(r'\b(?:if|throw|return)\b|;', value):
         if re.search(r'\s+-(?:c|i)?ne\s+', value) and not re.search(r'\s+-(?:and|or)\s+', value):
             return 'changed or nonempty text alone'

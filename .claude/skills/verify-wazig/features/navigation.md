@@ -22,7 +22,7 @@ Preconditions: doctor passes, two unfiltered chats, Alpha selected and composer 
 
 - **Run:** dispatch `feature=navigation`; GitHub helper: `pwsh -NoProfile -File tools/verify-wazig/run.ps1 -Feature navigation`.
 - **Before:** capture Alpha selected in `before.png` and `before.state.json`.
-- **Next:** `Send-Keys $session '^{TAB}'`; wait for `status.selected.name=Verification Beta`. Capture `after.png`; the sidebar selection must agree with the read-only selected-chat identity.
+- **Next:** `Send-Keys $session '^{TAB}'`; wait for `status.selected.name=Verification Beta`. Capture `after.png`. Read-only status is the only selection oracle: the sidebar is owner-drawn, so this journey does not measure its highlight.
 - **Back:** `Send-Keys $session '^+{TAB}'`; wait for Alpha again.
 - **Side effects:** the fixture file retains both chats, sync stays stopped and no send/archive is pending. Positional, edge and page shortcuts are mapped entry points, not exercised by this default recipe.
 

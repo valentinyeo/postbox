@@ -30,7 +30,7 @@ $offline = Wait-Until {
     $state = Read-Control $session status
     if ($state.sync_state -ceq 'offline' -and $state.sync_line -clike 'Offline*') { $state }
 } 'the chat header says the inbox is offline'
-Assert-That ($offline.sync_line.Contains($caughtUp.sync_as_of) -or $offline.sync_as_of -match '^\d\d:\d\d$') 'Offline line lost the last sync time'
+Assert-That ($offline.sync_line.StartsWith('Offline') -and $offline.sync_line.EndsWith("last sync $($caughtUp.sync_as_of)")) 'Offline line lost the last sync time'
 $offlineRect = & $syncRect $offline
 Save-Screen $session sync-offline
 $hubLines = @(Get-Content $launchLogPath | Where-Object { $_ -match 'hub events: ' })

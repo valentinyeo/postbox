@@ -19,7 +19,7 @@ Open a WhatsApp chat with several voice messages. Scroll with the mouse wheel, c
 
 ## Driving it with PowerShell UI Automation
 
-PowerShell UI Automation runs `Invoke-VoiceJourney` with the unified `Start-FakeBridge -Voice` fixture: `Verification Voice` holds five incoming `audio/ogg` voice notes served by the fake hub, `Verification Beta` one text message. Wait for the five automatic media downloads, reopen the chat with Ctrl+Tab and Ctrl+Shift+Tab, write one long cached transcript (`<voice file>.txt`) beside each downloaded `.ogg` and reopen again until all five show. Then probe, scroll up four notches and down two with real SendInput wheel input over the canvas, click Show more with a real SendInput click, and scroll up six and down three, probing after every step.
+PowerShell UI Automation runs `Invoke-VoiceJourney` with the unified fake bridge in `--voice` mode: `Verification Voice` holds five incoming `audio/ogg` voice notes served by the fake hub, `Verification Beta` one text message. Wait for the five automatic media downloads, reopen the chat with Ctrl+Tab and Ctrl+Shift+Tab, write one long cached transcript (`<voice file>.txt`) beside each downloaded `.ogg` and reopen again until all five show. Then probe, scroll up four notches and down two with real SendInput wheel input over the canvas, click Show more with a real SendInput click, and scroll up six and down three, probing after every step.
 
 The journey starts and cancels fixture recording with Ctrl+Shift+M and Escape, selects a voice note with Alt+J, starts it with a click and pauses it with Ctrl+P. `voice-recording.json` and `playback.json` record the results.
 
