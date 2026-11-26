@@ -7,7 +7,7 @@ function Select-OnceChat($Session, [string]$Id, [string]$Provider) {
 }
 
 function Send-OnceMessage($Session, [string]$Text, [string]$Label, [string]$Chat) {
-    $before = @(Read-BridgeRequests $Session | Where-Object { $_.wire_path -eq '/v1/wazig/send' -and $_.status -eq 200 -and $_.body.chat -ceq $Chat }).Count
+    $before = @(Read-BridgeRequests $Session | Where-Object { $_.wire_path -eq '/v1/wazig/send' -and $_.status -eq 200 -and $_.body.chat -ceq $Chat -and $_.body.text -ceq $Text }).Count
     Click-Control $Session '1032'
     Send-Keys $Session $Text
     Send-Keys $Session '{ENTER}'
