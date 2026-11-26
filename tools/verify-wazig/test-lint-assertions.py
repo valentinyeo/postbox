@@ -52,6 +52,18 @@ class ProxyAssertions(unittest.TestCase):
     def test_harness_flag_is_not_an_exception(self):
         self.assertTrue(self.check_script('Assert-That ($LASTEXITCODE -eq 0) "passed" -Harness'))
 
+    def test_containment_and_wildcard_containment_fail(self):
+        for expression in ("(Read-Edit $edit).Contains('x')", "$row.text.Contains('done')", '($pins.PinnedChats -like "*$id*")'):
+            with self.subTest(expression=expression):
+                self.assertTrue(self.check_script(f'Assert-That ({expression}) "seen"'))
+
+    def test_containment_guarded_or_compared_passes(self):
+        for expression in ("(Test-Path $draft) -and (Get-Content $draft -Raw).Contains('x')",
+                           "-not $log.Contains('WrongChat')",
+                           "$line.StartsWith('Offline') -and $line.EndsWith('last sync 08:45')"):
+            with self.subTest(expression=expression):
+                self.assertEqual([], self.check_script(f'Assert-That ({expression}) "seen"'))
+
     def test_exact_reasoned_exception_and_stale_exception(self):
         allowed = [dict(file='journey-example.ps1', assertion='$LASTEXITCODE -eq 0', reason='The external screenshot validator checks the visible popup pixels and exact payload.')]
         self.assertEqual([], self.check_script('Assert-That ($LASTEXITCODE -eq 0) "validated"', allowed))

@@ -6,8 +6,8 @@ function Select-OnceChat($Session, [string]$Id, [string]$Provider) {
     $null = Wait-Until { (Read-Control $Session status).selected.id -ceq $Id } "$Id selected" 30
 }
 
-function Send-OnceMessage($Session, [string]$Text, [string]$Label) {
-    $before = @(Read-BridgeRequests $Session | Where-Object { $_.wire_path -eq '/v1/wazig/send' -and $_.status -eq 200 }).Count
+function Send-OnceMessage($Session, [string]$Text, [string]$Label, [string]$Chat) {
+    $before = @(Read-BridgeRequests $Session | Where-Object { $_.wire_path -eq '/v1/wazig/send' -and $_.status -eq 200 -and $_.body.chat -ceq $Chat }).Count
     Click-Control $Session '1032'
     Send-Keys $Session $Text
     Send-Keys $Session '{ENTER}'
@@ -17,7 +17,7 @@ function Send-OnceMessage($Session, [string]$Text, [string]$Label) {
     $null = Wait-Until {
         $seen = @((Read-Control $Session messages).messages | Where-Object { $_.text -like "$Text*" }).Count
         if ($seen -gt $script:onceMaxCopies) { $script:onceMaxCopies = $seen }
-        @(Read-BridgeRequests $Session | Where-Object { $_.wire_path -eq '/v1/wazig/send' -and $_.status -eq 200 }).Count -eq $before + 1
+        @(Read-BridgeRequests $Session | Where-Object { $_.wire_path -eq '/v1/wazig/send' -and $_.status -eq 200 -and $_.body.chat -ceq $Chat -and $_.body.text -ceq $Text }).Count -eq $before + 1
     } "$Label send accepted by the hub" 30
     $maxCopies = $script:onceMaxCopies
     Start-Sleep -Seconds 10
@@ -36,11 +36,11 @@ function Send-OnceMessage($Session, [string]$Text, [string]$Label) {
 
 Send-Keys $session '%1'
 Select-OnceChat $session 'fixture-beta' 'whatsapp'
-Send-OnceMessage $session 'Once normal chat message' 'normal-chat'
+Send-OnceMessage $session 'Once normal chat message' 'normal-chat' 'fixture-beta'
 
 Send-Keys $session '^+e'
 $null = Wait-Until { -not ((Read-Control $session chats).chats.id -contains 'fixture-beta') } 'test chat kept archived' 60
 Invoke-PaletteCommand $session 'Show archived chats'
 $null = Wait-Until { $state = Read-Control $session status; $state.show_archived -and $state.chat_count -eq 1 -and $state.selected.name -eq 'Verification Beta' } 'test chat open in the archived list' 60
-Send-OnceMessage $session 'Once archived chat message' 'archived-chat'
+Send-OnceMessage $session 'Once archived chat message' 'archived-chat' 'fixture-beta'
 Hub-Pass $session send-once-normal-and-archived

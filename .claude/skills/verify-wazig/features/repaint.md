@@ -10,7 +10,7 @@ Open a chat and leave the app untouched while incoming messages reach another ch
 
 ## Driving it with PowerShell UI Automation
 
-PowerShell UI Automation runs `Invoke-RepaintJourney` with the unified `Start-FakeBridge -Repaint` fixture. Wait for Alpha history and selection, save before screenshots and `wazigctl status` paints, then observe 60 seconds with no input. The hub publishes an unchanged baseline every two seconds and one incoming Beta message every ten seconds. Read status again and retain `paints.json`, `before.chats.json`, `after.chats.json`, screenshots and UIA/state snapshots. Require Beta's incoming unread count to increase by at least five and Alpha to remain selected. Sum window_full, canvas_full and list_full deltas; fail above three with `repaint: <N> full repaints in 60 s, limit 3` in failure.txt.
+PowerShell UI Automation runs `Invoke-RepaintJourney` with the unified fake bridge in `--repaint` mode. Wait for Alpha history and selection, save before screenshots and `wazigctl status` paints, then observe 60 seconds with no input. The hub publishes an unchanged baseline every two seconds and one incoming Beta message every ten seconds. Read status again and retain `paints.json`, `before.chats.json`, `after.chats.json`, screenshots and UIA/state snapshots. Require Beta's incoming unread count to increase by at least five and Alpha to remain selected. Sum window_full, canvas_full and list_full deltas; fail above three with `repaint: <N> full repaints in 60 s, limit 3` in failure.txt.
 
 ## Gotchas
 
